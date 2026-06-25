@@ -10,7 +10,6 @@ const { Server } = require('socket.io');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const connectDB = require('./config/db');
-const passport = require('./config/passport');
 const socketMainHandler = require('./sockets');
 
 const app = express();
@@ -58,7 +57,6 @@ app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use(morgan('dev'));
-app.use(passport.initialize());
 
 // Inject Socket.io
 app.use((req, res, next) => {
