@@ -1,0 +1,276 @@
+{
+  "users": [
+    {
+      "_id": "6999e95a77d8851167e7296c",
+      "name": "johndoe",
+      "email": "john@gmail.com",
+      "organizationId": "6999e95a77d8851167e7296e"
+    },
+    {
+      "_id": "699d6b99a1b6b251e91f98e3",
+      "name": "dinesh kumar ",
+      "email": "dineshkumar@innotrat.in",
+      "organizationId": "699d700fa1b6b251e91f99b9"
+    },
+    {
+      "_id": "699d700ea1b6b251e91f99b7",
+      "name": "nandhini",
+      "email": "nandhini@innotrat.in",
+      "organizationId": "699d700fa1b6b251e91f99b9"
+    },
+    {
+      "_id": "699dee8833ad3348d0415fe9",
+      "name": "Final Victory",
+      "email": "victory_final_final@example.com",
+      "organizationId": "699dee8933ad3348d0415feb"
+    },
+    {
+      "_id": "699def8233ad3348d0416018",
+      "name": "Project Tester",
+      "email": "project_test_alpha@example.com",
+      "organizationId": "699def8333ad3348d041601a"
+    },
+    {
+      "_id": "699df4d733ad3348d04161da",
+      "name": "Collaborator Jane",
+      "email": "jane_collaborator@example.com",
+      "organizationId": "699def8333ad3348d041601a"
+    },
+    {
+      "_id": "699e79a3e91e273d61f5889c",
+      "name": "manikandandan",
+      "email": "manikandan@innotrat.in",
+      "organizationId": "699e79a3e91e273d61f5889e"
+    }
+  ],
+  "projects": [
+    {
+      "_id": "6999ea6377d8851167e729c5",
+      "name": "inno-ide",
+      "key": "REDESIGN",
+      "organization": "6999e95a77d8851167e7296e",
+      "lead": "6999e95a77d8851167e7296c",
+      "members": [
+        "6999e95a77d8851167e7296c"
+      ]
+    },
+    {
+      "_id": "699d6e2da1b6b251e91f98f3",
+      "name": "ide",
+      "key": "WEB",
+      "organization": "699d6b99a1b6b251e91f98e5",
+      "lead": "699d6b99a1b6b251e91f98e3",
+      "members": [
+        "699d6b99a1b6b251e91f98e3"
+      ]
+    },
+    {
+      "_id": "699d7063a1b6b251e91f99e1",
+      "name": "ide",
+      "key": "WEB",
+      "organization": "699d700fa1b6b251e91f99b9",
+      "lead": "699d700ea1b6b251e91f99b7",
+      "members": [
+        "699d700ea1b6b251e91f99b7"
+      ]
+    },
+    {
+      "_id": "699defa333ad3348d041602c",
+      "name": "Automated Test Project",
+      "key": "ATP",
+      "organization": "699def8333ad3348d041601a",
+      "lead": "699def8233ad3348d0416018",
+      "members": [
+        "699def8233ad3348d0416018"
+      ]
+    },
+    {
+      "_id": "699e78a8e91e273d61f587e4",
+      "name": "web redisgn",
+      "key": "IDE",
+      "organization": "699d700fa1b6b251e91f99b9",
+      "lead": "699d700ea1b6b251e91f99b7",
+      "members": [
+        "699d700ea1b6b251e91f99b7"
+      ]
+    },
+    {
+      "_id": "699f22c2b60f78e3e68a093c",
+      "name": "Demo Project",
+      "key": "DEMO",
+      "organization": "6999e95a77d8851167e7296e",
+      "lead": "6999e9d677d8851167e72993",
+      "members": [
+        "6999e95a77d8851167e7296c",
+        "6999e9d677d8851167e72993"
+      ]
+    },
+    {
+      "_id": "699f22ec7eef8af3e57d9174",
+      "name": "Demo Project",
+      "key": "DEMO",
+      "organization": "6999e95a77d8851167e7296e",
+      "lead": "6999e95a77d8851167e7296c",
+      "members": [
+        "6999e95a77d8851167e7296c"
+      ]
+    },
+    {
+      "_id": "699f2d5b696c924248934ace",
+      "name": "Demo Project",
+      "key": "DEMO",
+      "organization": "6999e95a77d8851167e7296e",
+      "lead": "6999e95a77d8851167e7296c",
+      "members": [
+        "6999e95a77d8851167e7296c"
+      ]
+    }
+  ],
+  "organizations": [
+    {
+      "_id": "6999e95a77d8851167e7296e",
+      "name": "Apple",
+      "members": [
+        {
+          "user": "6999e95a77d8851167e7296c",
+          "role": "Owner",
+          "_id": "6999e95a77d8851167e7296f"
+        },
+        {
+          "user": "6999e9d677d8851167e72993",
+          "role": "Member",
+          "_id": "6999ea0777d8851167e729b9"
+        }
+      ],
+      "projects": [
+        "6999ea6377d8851167e729c5"
+      ]
+    },
+    {
+      "_id": "6999e9d677d8851167e72995",
+      "name": "Apple",
+      "members": [
+        {
+          "user": "6999e9d677d8851167e72993",
+          "role": "Owner",
+          "_id": "6999e9d677d8851167e72996"
+        }
+      ],
+      "projects": []
+    },
+    {
+      "_id": "699d6b99a1b6b251e91f98e5",
+      "name": "apple",
+      "members": [
+        {
+          "user": "699d6b99a1b6b251e91f98e3",
+          "role": "Owner",
+          "_id": "699d6b99a1b6b251e91f98e6"
+        }
+      ],
+      "projects": [
+        "699d6e2da1b6b251e91f98f3"
+      ]
+    },
+    {
+      "_id": "699d700fa1b6b251e91f99b9",
+      "name": "apple",
+      "members": [
+        {
+          "user": "699d700ea1b6b251e91f99b7",
+          "role": "Owner",
+          "_id": "699d700fa1b6b251e91f99ba"
+        },
+        {
+          "user": "699d6b99a1b6b251e91f98e3",
+          "role": "Member",
+          "_id": "699d703da1b6b251e91f99cd"
+        }
+      ],
+      "projects": [
+        "699d7063a1b6b251e91f99e1",
+        "699e78a8e91e273d61f587e4"
+      ]
+    },
+    {
+      "_id": "699dee8933ad3348d0415feb",
+      "name": "Elite Org",
+      "members": [
+        {
+          "user": "699dee8833ad3348d0415fe9",
+          "role": "Owner",
+          "_id": "699dee8933ad3348d0415fec"
+        }
+      ],
+      "projects": []
+    },
+    {
+      "_id": "699def8333ad3348d041601a",
+      "name": "Test Org",
+      "members": [
+        {
+          "user": "699def8233ad3348d0416018",
+          "role": "Owner",
+          "_id": "699def8333ad3348d041601b"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Member",
+          "_id": "699df51d33ad3348d0416209"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Member",
+          "_id": "699df56833ad3348d041621e"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Member",
+          "_id": "699df59533ad3348d0416224"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Member",
+          "_id": "699df5a933ad3348d041622b"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Member",
+          "_id": "699df5f933ad3348d041625b"
+        },
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Developer",
+          "_id": "699df78aaa4234e9d7e9ddf0"
+        }
+      ],
+      "projects": [
+        "699defa333ad3348d041602c"
+      ]
+    },
+    {
+      "_id": "699df4d733ad3348d04161dc",
+      "name": "Collaborator Org",
+      "members": [
+        {
+          "user": "699df4d733ad3348d04161da",
+          "role": "Owner",
+          "_id": "699df4d733ad3348d04161dd"
+        }
+      ],
+      "projects": []
+    },
+    {
+      "_id": "699e79a3e91e273d61f5889e",
+      "name": "apple",
+      "members": [
+        {
+          "user": "699e79a3e91e273d61f5889c",
+          "role": "Owner",
+          "_id": "699e79a3e91e273d61f5889f"
+        }
+      ],
+      "projects": []
+    }
+  ]
+}

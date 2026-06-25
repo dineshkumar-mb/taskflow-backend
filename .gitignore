@@ -1,0 +1,11 @@
+node_modules/
+.env
+log.txt
+out.txt
+out_debug.txt
+test-ai-out.txt
+test-ai-out2.txt
+test_out_ascii.txt
+seed_output.log
+error.log
+build.log
