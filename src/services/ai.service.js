@@ -900,35 +900,57 @@ Return JSON ONLY.
 // ─────────────────────────────────────────────
 // 6. MINUTES OF MEETING GENERATION
 // ─────────────────────────────────────────────
-exports.generateMOM = async (transcript) => {
-    const model = getModel();
-    if (!model) return { summary: "AI not configured", actionItems: [], decisions: [], risks: [] };
+exports.generateMOMFromTranscript = async (transcriptText, agenda, participantIds) => {
+  try {
+    const model = getModel('gemini-1.5-pro'); // Use getModel from factory, fallback will be handled
+    if (!model) throw new Error('AI not configured');
 
-    const prompt = `
-TASK:
-Analyze the following meeting transcript and generate structured Minutes of Meeting (MOM).
+    const prompt = `You are an expert meeting note-taker. Analyze the following meeting transcript and generate structured Minutes of Meeting (MOM).
 
-TRANSCRIPT:
-"${transcript}"
+Meeting Agenda: ${agenda || 'General discussion'}
 
-RETURN JSON ONLY:
+Transcript:
+${transcriptText}
+
+Please provide the output ONLY as valid JSON (no markdown formatting, no code blocks, just raw JSON):
 {
-  "summary": "Brief 2-3 sentence overview of the meeting",
-  "actionItems": [
-    { "task": "task description", "assignee": "Person Name or Unassigned" }
+  "summary": "A 2-3 sentence overview of what was discussed",
+  "decisions": [
+    "Decision 1",
+    "Decision 2"
   ],
-  "decisions": ["decision 1", "decision 2"],
-  "risks": ["risk 1", "risk 2"]
-}
-`;
-
-    try {
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        return jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: "Failed to parse AI output", actionItems: [], decisions: [], risks: [] };
-    } catch (error) {
-        console.error('Gemini Error (MOM):', error.message || error);
-        return { summary: "Failed to generate MOM due to AI service error.", actionItems: [], decisions: [], risks: [] };
+  "actionItems": [
+    {
+      "title": "Brief action item title",
+      "description": "More detailed description",
+      "assigneeName": "Name of person (from transcript)",
+      "priority": "High|Medium|Low",
+      "dueDate": "YYYY-MM-DD (estimate based on context)"
     }
+  ]
+}
+
+Rules:
+- Extract only actionable items with clear ownership
+- If no assignee is mentioned, assign to the first speaker or leave blank
+- Priorities should be inferred from urgency mentioned
+- Dates should be estimated from context (e.g., "next week", "by Friday")
+- Keep summary concise (2-3 sentences max)
+- Include only major decisions`;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+
+    // Parse JSON response (strip markdown if present)
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in response');
+    }
+
+    const momData = JSON.parse(jsonMatch[0]);
+    return momData;
+  } catch (error) {
+    console.error('Error generating MOM:', error);
+    throw new Error(`Failed to generate MOM: ${error.message}`);
+  }
 };

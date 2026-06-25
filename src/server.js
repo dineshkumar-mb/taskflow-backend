@@ -83,6 +83,7 @@ const billingRoutes = require('./routes/billing.routes');
 const inviteRoutes = require('./routes/invite.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const debugRoutes = require('./routes/debug.routes');
+const meetingRoutes = require('./routes/meeting.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
@@ -98,6 +99,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/debug', debugRoutes);
+app.use('/api/meetings', meetingRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running...');

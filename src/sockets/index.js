@@ -1,7 +1,10 @@
 const issueSocketHandler = require('./issue.socket');
 const chatSocketHandler = require('./chat.socket');
+const meetingSocketHandler = require('./meeting.socket');
 
 const socketMainHandler = (io) => {
+    meetingSocketHandler(io);
+
     io.on('connection', (socket) => {
         console.log('User connected:', socket.id);
 
