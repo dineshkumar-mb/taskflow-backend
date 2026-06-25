@@ -312,8 +312,9 @@ exports.confirmAndSendMOM = async (req, res) => {
     meeting.mom.confirmedAt = new Date();
     await meeting.save();
 
-    // 1. Send MOM email to all participants
-    const emailPromises = meeting.participantIds.map(participant =>
+    // 1. Send MOM email to all participants and host
+    const allAttendees = [...meeting.participantIds, meeting.hostId];
+    const emailPromises = allAttendees.map(participant =>
       sendMOMEmail(meeting, participant)
     );
     await Promise.all(emailPromises);
