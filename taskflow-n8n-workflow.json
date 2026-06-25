@@ -1,0 +1,348 @@
+{
+  "name": "TaskFlow Complete Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "taskflow-issues",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-issues",
+      "name": "Webhook - Issues",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "taskflow-issues-webhook-id"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.event}}",
+              "value2": "issue.created"
+            }
+          ]
+        }
+      },
+      "id": "if-issue-created",
+      "name": "If Issue Created",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.issue.priority}}",
+              "value2": "high"
+            }
+          ]
+        }
+      },
+      "id": "if-high-priority",
+      "name": "If High Priority",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        690,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Auto-Assignment Logic\n// Maps issue type to the responsible team member\n// Bug → Nandhini (backend dev)\n// Feature / Story → Frontend developer\n// Epic / Task → Project Lead\n\nconst item = items[0].json;\nconst issue = item.body.issue;\nconst type = (issue.type || 'task').toLowerCase();\n\nconst assignmentMap = {\n  'bug':     'Nandhini',\n  'task':    'Nandhini',\n  'story':   'Nandhini',\n  'feature': 'Nandhini',\n  'epic':    'Nandhini',\n  'subtask': 'Nandhini',\n};\n\nconst assigneeName = assignmentMap[type] || 'Nandhini';\n\nreturn [{\n  json: {\n    ...item,\n    autoAssign: {\n      assigneeName,\n      issueId: issue.id,\n      issueKey: issue.key,\n      issueTitle: issue.title,\n      issueType: type,\n      priority: issue.priority,\n    }\n  }\n}];"
+      },
+      "id": "auto-assign-logic",
+      "name": "Auto-Assign Logic",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        910,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:5001/api/issues/{{$json.autoAssign.issueId}}/assign",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "n8n-taskflow-secret-2024"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "assignee",
+              "value": "={{$json.autoAssign.assigneeName}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "update-issue-assign",
+      "name": "Update Issue Assignment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1130,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ✅ Auto-Assignment Complete\n\n**Issue:** {{$json.autoAssign.issueKey}} — {{$json.autoAssign.issueTitle}}\n**Type:** {{$json.autoAssign.issueType}}\n**Priority:** 🔴 {{$json.autoAssign.priority}}\n**Auto-Assigned To:** {{$json.autoAssign.assigneeName}}\n\n*Notification sent to assignee via TaskFlow in-app system.*"
+      },
+      "id": "format-assignment-summary",
+      "name": "Format Assignment Summary",
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⏭️ Skipped — Not High Priority\n\n**Issue:** {{$json.body.issue.key}} — {{$json.body.issue.title}}\n**Priority:** {{$json.body.issue.priority}}\n\n*Automation only triggers for HIGH priority issues.*"
+      },
+      "id": "skip-not-high",
+      "name": "Skip - Not High Priority",
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        910,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"received\": true, \"event\": \"{{$json.body.event}}\", \"status\": \"processed\"}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        690,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "taskflow-sprints",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-sprints",
+      "name": "Webhook - Sprints",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        520
+      ],
+      "webhookId": "taskflow-sprints-webhook-id"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.event}}",
+              "value2": "sprint.started"
+            }
+          ]
+        }
+      },
+      "id": "if-sprint-started",
+      "name": "If Sprint Started",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        470,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🚀 Sprint Started: {{$json.body.sprint.name}}\n\n* **Goal:** {{$json.body.sprint.goal}}\n* **Start:** {{$json.body.sprint.startDate}}\n* **End:** {{$json.body.sprint.endDate}}\n\nGood luck team!"
+      },
+      "id": "format-sprint-start",
+      "name": "Format Sprint Start",
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        690,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "taskflow-billing",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-billing",
+      "name": "Webhook - Billing",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        700
+      ],
+      "webhookId": "taskflow-billing-webhook-id"
+    },
+    {
+      "parameters": {
+        "content": "## 💳 Payment Successful!\n\nYour organization plan has been upgraded to **{{$json.body.organization.plan}}**.\nThank you for using TaskFlow."
+      },
+      "id": "format-payment-success",
+      "name": "Format Payment Success",
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        470,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Issues": {
+      "main": [
+        [
+          {
+            "node": "If Issue Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Issue Created": {
+      "main": [
+        [
+          {
+            "node": "If High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If High Priority": {
+      "main": [
+        [
+          {
+            "node": "Auto-Assign Logic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip - Not High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Assign Logic": {
+      "main": [
+        [
+          {
+            "node": "Update Issue Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Issue Assignment": {
+      "main": [
+        [
+          {
+            "node": "Format Assignment Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Sprints": {
+      "main": [
+        [
+          {
+            "node": "If Sprint Started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Sprint Started": {
+      "main": [
+        [
+          {
+            "node": "Format Sprint Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Billing": {
+      "main": [
+        [
+          {
+            "node": "Format Payment Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6b7eb7eb-a83d-4c3d-82c8-831d10cf6b7d"
+}
