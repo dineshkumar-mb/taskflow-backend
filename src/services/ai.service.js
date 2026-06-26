@@ -1034,6 +1034,7 @@ exports.transcribeAudioFile = async (buffer, filename) => {
         const response = await openai.audio.transcriptions.create({
             file: fs.createReadStream(tempFilePath),
             model: modelName,
+            language: 'en',
         });
         fs.unlinkSync(tempFilePath); // cleanup
         return response.text;
