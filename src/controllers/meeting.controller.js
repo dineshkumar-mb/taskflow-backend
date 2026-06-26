@@ -324,12 +324,14 @@ exports.confirmAndSendMOM = async (req, res) => {
       const issue = new Issue({
         title: actionItem.title,
         description: actionItem.description,
-        project: meeting.projectId, // It seems taskflow uses project instead of projectId for Issue model, let me verify this. I will use project
-        sprint: meeting.sprintId, // taskflow uses sprint, not sprintId. 
+        project: meeting.projectId,
+        sprint: meeting.sprintId,
         assignee: actionItem.assigneeId,
-        priority: actionItem.priority,
+        priority: actionItem.priority ? actionItem.priority.toLowerCase() : 'medium',
         dueDate: actionItem.dueDate,
-        status: 'to-do',
+        status: 'todo',
+        organization: meeting.organizationId,
+        reporter: meeting.hostId
       });
       const savedIssue = await issue.save();
       actionItem.createdIssueId = savedIssue._id;
