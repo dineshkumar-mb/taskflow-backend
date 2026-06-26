@@ -66,10 +66,14 @@ const logoutUser = (req, res) => {
     // Clear both tokens
     res.cookie('accessToken', 'none', {
         httpOnly: true,
+        secure: true,
+        sameSite: 'none',
         expires: new Date(Date.now() + 5 * 1000), // Expires in 5 seconds
     });
     res.cookie('refreshToken', 'none', {
         httpOnly: true,
+        secure: true,
+        sameSite: 'none',
         expires: new Date(Date.now() + 5 * 1000),
     });
 

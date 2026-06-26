@@ -8,16 +8,16 @@ const generateToken = (res, user) => {
     // Access Token Cookie (15 Mins)
     res.cookie('accessToken', accessToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV !== 'development',
-        sameSite: 'lax',
+        secure: true, // MUST be true when sameSite is 'none'
+        sameSite: 'none',
         maxAge: 15 * 60 * 1000,
     });
 
     // Refresh Token Cookie (7 Days)
     res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV !== 'development',
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
