@@ -29,6 +29,11 @@ const userSchema = new mongoose.Schema(
             ref: 'Organization',
         },
         role: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Role'
+        },
+        // Fallback for legacy string roles or initial setup
+        roleName: {
             type: String,
             enum: ['SuperAdmin', 'OrgOwner', 'Admin', 'Member', 'Viewer'],
             default: 'Member',
@@ -36,6 +41,13 @@ const userSchema = new mongoose.Schema(
         isVerified: {
             type: Boolean,
             default: false,
+        },
+        isTwoFactorEnabled: {
+            type: Boolean,
+            default: false,
+        },
+        twoFactorSecret: {
+            type: String,
         },
         verificationToken: String,
         resetPasswordToken: String,

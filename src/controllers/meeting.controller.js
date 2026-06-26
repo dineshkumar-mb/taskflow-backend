@@ -413,47 +413,80 @@ async function sendMOMEmail(meeting, participant) {
   });
 }
 
-function generateMOMEmailHTML(meeting, participant) {
-  const actionItemsHTML = meeting.mom.actionItems
-    .map(item => `
-      <div style="border: 1px solid #ddd; padding: 10px; margin: 8px 0; border-radius: 4px;">
-        <h4>${item.title}</h4>
-        <p>${item.description}</p>
-        <small>
-          <strong>Priority:</strong> ${item.priority} | 
-          <strong>Due:</strong> ${item.dueDate ? new Date(item.dueDate).toLocaleDateString() : 'TBD'}
-        </small>
-      </div>
-    `)
-    .join('');
+function generateMOMEmailHTML(meeting, recipient) {
+  // ✅ Check if recipient is the host
+  const isHost = recipient._id.toString() === meeting.hostId._id.toString();
 
-  const decisionsHTML = meeting.mom.decisions
-    .map(decision => `<li>${decision}</li>`)
-    .join('');
+  const recipientLabel = isHost ? ' (Meeting Host)' : '';
 
   return `
     <html>
       <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h1>${meeting.title}</h1>
-        <p><strong>Date:</strong> ${meeting.scheduledAt.toLocaleDateString()} at ${meeting.scheduledAt.toLocaleTimeString()}</p>
-        <p><strong>Duration:</strong> ${meeting.duration} minutes</p>
-        
-        <h2>Summary</h2>
-        <p>${meeting.mom.summary}</p>
-        
-        <h2>Decisions Made</h2>
-        <ul>${decisionsHTML}</ul>
-        
-        <h2>Action Items</h2>
-        ${actionItemsHTML}
-        
-        <hr/>
-        <p style="color: #666; font-size: 12px;">
-          <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/meetings/${meeting._id}/mom">
-            View full meeting in TaskFlow
-          </a> | 
-          Action items have been automatically added to your project board.
-        </p>
+
+        <div style="background: #1a1a2e; padding: 20px; border-radius: 8px 8px 0 0;">
+          <h1 style="color: #ffffff; margin: 0; font-size: 20px;">📋 Minutes of Meeting</h1>
+          <p style="color: #a0a0b0; margin: 4px 0 0;">${meeting.title}</p>
+        </div>
+
+        <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: none;">
+
+          <p>Hi <strong>${recipient.name}${recipientLabel}</strong>,</p>
+          <p>Here are the minutes from your recent meeting.</p>
+
+          <table style="width: 100%; margin: 16px 0; font-size: 13px;">
+            <tr>
+              <td style="color: #6b7280; padding: 4px 0;">📅 Date</td>
+              <td style="font-weight: 500;">${new Date(meeting.scheduledAt).toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td style="color: #6b7280; padding: 4px 0;">⏱ Duration</td>
+              <td style="font-weight: 500;">${meeting.duration || 'N/A'} minutes</td>
+            </tr>
+            <tr>
+              <td style="color: #6b7280; padding: 4px 0;">👤 Host</td>
+              <td style="font-weight: 500;">${meeting.hostId.name}</td>
+            </tr>
+          </table>
+
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+
+          <h2 style="font-size: 16px; color: #111;">📝 Summary</h2>
+          <p style="color: #374151; line-height: 1.6;">${meeting.mom.summary}</p>
+
+          <h2 style="font-size: 16px; color: #111;">✅ Decisions Made</h2>
+          <ul style="color: #374151; line-height: 1.8;">
+            ${meeting.mom.decisions.map(d => `<li>${d}</li>`).join('')}
+          </ul>
+
+          <h2 style="font-size: 16px; color: #111;">🎯 Action Items</h2>
+          ${meeting.mom.actionItems.map(item => `
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin: 8px 0;">
+              <strong>${item.title}</strong>
+              <p style="margin: 4px 0; color: #6b7280; font-size: 13px;">${item.description || ''}</p>
+              <div style="display: flex; gap: 16px; font-size: 12px; margin-top: 8px;">
+                <span style="background: ${item.priority === 'High' ? '#fef2f2' : item.priority === 'Medium' ? '#fefce8' : '#f0fdf4'}; 
+                             color: ${item.priority === 'High' ? '#dc2626' : item.priority === 'Medium' ? '#ca8a04' : '#16a34a'}; 
+                             padding: 2px 8px; border-radius: 4px;">
+                  ${item.priority}
+                </span>
+                ${item.dueDate ? `<span style="color: #6b7280;">Due: ${new Date(item.dueDate).toLocaleDateString()}</span>` : ''}
+              </div>
+            </div>
+          `).join('')}
+
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/meetings/${meeting._id}/mom"
+               style="background: #4f46e5; color: white; padding: 12px 28px; 
+                      border-radius: 6px; text-decoration: none; font-weight: 500;">
+              View Full Meeting in TaskFlow
+            </a>
+          </div>
+
+          <p style="margin-top: 24px; font-size: 12px; color: #9ca3af; text-align: center;">
+            Action items have been automatically added to your project board.
+          </p>
+        </div>
+
       </body>
     </html>
   `;

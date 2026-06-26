@@ -37,9 +37,11 @@ const organizationSchema = new mongoose.Schema(
         },
         stripeCustomerId: String,
         stripeSubscriptionId: String,
+        cashfreeSubscriptionId: String,
+        cashfreePlanId: String,
         subscriptionStatus: {
             type: String,
-            enum: ['active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'trialing', 'unpaid'],
+            enum: ['active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'trialing', 'unpaid', 'ACTIVE', 'ON_HOLD', 'CANCELLED'],
             default: 'active', // Defaulting to active for free plan logic
         },
         aiUsageCount: {

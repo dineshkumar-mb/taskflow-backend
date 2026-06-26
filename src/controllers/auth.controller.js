@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
 const crypto = require('crypto');
+const auditService = require('../services/audit.service');
 
 const registerUser = async (req, res) => {
     try {
@@ -14,7 +15,8 @@ const registerUser = async (req, res) => {
             name: user.name,
             email: user.email,
             organizationId: user.organizationId,
-            role: user.role,
+            role: user.role?.name || user.roleName || user.role,
+            isTwoFactorEnabled: user.isTwoFactorEnabled,
             token: accessToken, // Still sending access token string for legacy fallback if needed
         });
     } catch (error) {
@@ -27,14 +29,33 @@ const loginUser = async (req, res) => {
 
     try {
         const user = await authService.loginUser(email, password);
+        
+        if (user.isTwoFactorEnabled) {
+            return res.status(200).json({
+                requires2FA: true,
+                userId: user._id,
+                email: user.email
+            });
+        }
+
         const { accessToken } = generateToken(res, user);
         res.json({
             _id: user._id,
             name: user.name,
             email: user.email,
             organizationId: user.organizationId,
-            role: user.role,
+            role: user.role?.name || user.roleName || user.role,
+            isTwoFactorEnabled: user.isTwoFactorEnabled,
             token: accessToken,
+        });
+
+        auditService.logAction({
+            action: 'LOGIN',
+            entityType: 'User',
+            entityId: user._id,
+            user: user._id,
+            organization: user.organizationId,
+            ipAddress: req.ip
         });
     } catch (error) {
         res.status(401).json({ message: error.message });
@@ -67,7 +88,7 @@ const refreshSession = async (req, res) => {
         }
 
         const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET + '_REFRESH');
-        const user = await User.findById(decoded.id);
+        const user = await User.findById(decoded.id).populate('role');
 
         if (!user) {
             return res.status(401).json({ message: 'Invalid refresh token payload' });
@@ -80,7 +101,8 @@ const refreshSession = async (req, res) => {
             name: user.name,
             email: user.email,
             organizationId: user.organizationId,
-            role: user.role,
+            role: user.role?.name || user.roleName || user.role,
+            isTwoFactorEnabled: user.isTwoFactorEnabled,
             token: accessToken,
         });
     } catch (error) {

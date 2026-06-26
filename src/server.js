@@ -84,6 +84,8 @@ const inviteRoutes = require('./routes/invite.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const debugRoutes = require('./routes/debug.routes');
 const meetingRoutes = require('./routes/meeting.routes');
+const roleRoutes = require('./routes/role.routes');
+const auditRoutes = require('./routes/audit.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
@@ -100,6 +102,12 @@ app.use('/api/invites', inviteRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api/meetings', meetingRoutes);
+app.use('/api/roles', roleRoutes);
+app.use('/api/audit', auditRoutes);
+
+// Webhook routes
+const webhookRoutes = require('./routes/webhook.routes');
+app.use('/api/webhooks', webhookRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running...');
@@ -107,6 +115,10 @@ app.get('/', (req, res) => {
 
 // Socket.IO Connection
 socketMainHandler(io);
+
+// Initialize Cron Jobs
+const initStandupCron = require('./cron/standup.cron');
+initStandupCron();
 
 const PORT = process.env.PORT || 5000;
 

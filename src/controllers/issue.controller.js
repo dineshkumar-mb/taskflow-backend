@@ -3,11 +3,23 @@ const Issue = require('../models/Issue'); // for webhook lookup
 const User = require('../models/User');
 const webhookService = require('../services/webhook.service');
 const notificationService = require('../services/notification.service');
+const auditService = require('../services/audit.service');
 
 const createIssue = async (req, res) => {
     try {
         const issue = await issueService.createIssue(req.user._id, req.user.organizationId, req.body, req.io);
         res.status(201).json(issue);
+        
+        auditService.logAction({
+            action: 'CREATE',
+            entityType: 'Issue',
+            entityId: issue._id,
+            user: req.user._id,
+            organization: req.user.organizationId,
+            details: { title: issue.title, key: issue.key },
+            ipAddress: req.ip
+        });
+
         // n8n: fire-and-forget
         webhookService.emit('issue.created', {
             issue: {
@@ -45,6 +57,17 @@ const updateIssue = async (req, res) => {
     try {
         const issue = await issueService.updateIssue(req.params.id, req.user.organizationId, req.body, req.user._id, req.io);
         res.json(issue);
+
+        auditService.logAction({
+            action: 'UPDATE',
+            entityType: 'Issue',
+            entityId: issue._id,
+            user: req.user._id,
+            organization: req.user.organizationId,
+            details: { changedFields: req.body },
+            ipAddress: req.ip
+        });
+
         // n8n: fire-and-forget, includes changed fields for routing in n8n
         webhookService.emit('issue.updated', {
             issue: {
@@ -64,6 +87,16 @@ const deleteIssue = async (req, res) => {
     try {
         await issueService.deleteIssue(req.params.id, req.user.organizationId);
         res.json({ message: 'Issue removed' });
+
+        auditService.logAction({
+            action: 'DELETE',
+            entityType: 'Issue',
+            entityId: req.params.id,
+            user: req.user._id,
+            organization: req.user.organizationId,
+            ipAddress: req.ip
+        });
+
         // n8n: fire-and-forget
         webhookService.emit('issue.deleted', {
             issueId: req.params.id,

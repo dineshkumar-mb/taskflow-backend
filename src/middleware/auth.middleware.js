@@ -102,4 +102,39 @@ const optionalAuth = async (req, res, next) => {
     next();
 };
 
-module.exports = { protect, authorize, checkPlan, optionalAuth };
+const requirePermission = (permission) => {
+    return async (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({ message: 'User not authenticated' });
+        }
+        
+        let hasPermission = false;
+        
+        if (req.user.role && req.user.role.permissions) {
+            hasPermission = req.user.role.permissions.includes('*') || req.user.role.permissions.includes(permission);
+        } else if (req.user.role) {
+            const Role = require('../models/Role');
+            const role = await Role.findById(req.user.role);
+            if (role) {
+                hasPermission = role.permissions.includes('*') || role.permissions.includes(permission);
+            }
+        }
+        
+        // Fallback for legacy admin roles
+        if (!hasPermission && (typeof req.user.role === 'string' || !req.user.role)) {
+            const adminRoles = ['SuperAdmin', 'OrgOwner', 'Admin'];
+            if (adminRoles.includes(req.user.role) || adminRoles.includes(req.user.roleName)) {
+                 hasPermission = true; 
+            }
+        }
+
+        if (!hasPermission) {
+            return res.status(403).json({
+                message: `User lacks required permission: ${permission}`
+            });
+        }
+        next();
+    };
+};
+
+module.exports = { protect, authorize, checkPlan, optionalAuth, requirePermission };

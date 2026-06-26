@@ -99,6 +99,44 @@ const createIssueFromPrompt = async (req, res) => {
     }
 };
 
+// @desc    Analyze Project Risk
+// @route   POST /api/ai/analyze-risk
+const analyzeRisk = async (req, res) => {
+    try {
+        const { projectId } = req.body;
+        if (!projectId) return res.status(400).json({ message: 'ProjectId is required' });
+
+        // Gather project data
+        const project = await Project.findById(projectId).populate('owner', 'name');
+        if (!project) return res.status(404).json({ message: 'Project not found' });
+
+        const issues = await Issue.find({ project: projectId })
+            .populate('assignee', 'name')
+            .lean();
+
+        // Format data for AI
+        const projectData = {
+            name: project.name,
+            key: project.key,
+            totalIssues: issues.length,
+            issues: issues.map(i => ({
+                title: i.title,
+                status: i.status,
+                priority: i.priority,
+                type: i.type,
+                assignee: i.assignee?.name || 'Unassigned',
+                createdAt: i.createdAt,
+                dueDate: i.dueDate
+            }))
+        };
+
+        const result = await aiService.analyzeRisk(projectData);
+        res.status(200).json(result);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Get AI Sprint Recommendations
 // @route   POST /api/ai/sprint-plan
 const getSprintPlan = async (req, res) => {
@@ -108,6 +146,20 @@ const getSprintPlan = async (req, res) => {
 
         const plan = await aiService.suggestSprintPlan(backlog);
         res.status(200).json(plan);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Parse natural language query into filters
+// @route   POST /api/ai/parse-search
+const parseQuery = async (req, res) => {
+    try {
+        const { query } = req.body;
+        if (!query) return res.status(400).json({ message: 'Query is required' });
+        
+        const filters = await aiService.parseSearchQuery(query);
+        res.status(200).json(filters);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -360,11 +412,28 @@ const copilotChat = async (req, res) => {
     }
 };
 
+const transcribeAudio = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No audio file provided' });
+        }
+        // req.file contains buffer and originalname
+        const text = await aiService.transcribeAudioFile(req.file.buffer, req.file.originalname);
+        res.status(200).json({ text });
+    } catch (error) {
+        console.error('Audio Transcription Error:', error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     generateSummary,
     estimatePoints,
     createIssueFromPrompt,
     getSprintPlan,
-    copilotChat
+    copilotChat,
+    parseQuery,
+    analyzeRisk,
+    transcribeAudio
 };
 
