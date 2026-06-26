@@ -18,12 +18,12 @@ const checkAiUsageLimit = async (req, res, next) => {
         const usageCount = organization.aiUsageCount || 0;
 
         const limits = {
-            free: 50,
-            pro: 500,
+            free: 5000, // Increased for transcription testing
+            pro: 50000,
             team: 1000000 // Unlimited for now
         };
 
-        const limit = limits[organization.plan] || 50;
+        const limit = limits[organization.plan] || 5000;
 
         if (usageCount >= limit) {
             return res.status(403).json({ message: `AI usage limit reached for ${organization.plan} plan.` });
