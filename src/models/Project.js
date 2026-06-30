@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const softDeletePlugin = require('../utils/softDelete.plugin');
 
 const projectSchema = new mongoose.Schema(
     {
@@ -27,6 +28,14 @@ const projectSchema = new mongoose.Schema(
                 ref: 'User',
             },
         ],
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
         description: {
             type: String,
         },
@@ -37,12 +46,27 @@ const projectSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
+        searchText: {
+            type: String,
+            index: true,
+        }
     },
     {
         timestamps: true,
     }
 );
 
+projectSchema.index({ organization: 1 });
+
+// Middleware to populate searchText for future search index
+projectSchema.pre('save', function(next) {
+    this.searchText = `${this.name} ${this.key} ${this.description || ''}`.trim().toLowerCase();
+    next();
+});
+
+projectSchema.plugin(softDeletePlugin);
+
 const Project = mongoose.model('Project', projectSchema);
 
 module.exports = Project;
+

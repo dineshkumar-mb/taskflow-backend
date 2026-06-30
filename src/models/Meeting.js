@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const softDeletePlugin = require('../utils/softDelete.plugin');
 const Schema = mongoose.Schema;
 
 const meetingSchema = new Schema({
@@ -31,6 +32,11 @@ const meetingSchema = new Schema({
     ref: 'Organization',
     required: true
   },
+  organization: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true
+  },
   projectId: {
     type: Schema.Types.ObjectId,
     ref: 'Project',
@@ -45,6 +51,14 @@ const meetingSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  createdBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  updatedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
   },
   
   // Participants
@@ -101,12 +115,25 @@ const meetingSchema = new Schema({
   // References
   activityId: Schema.Types.ObjectId,  // ref to Activity log entry
   recordingUrl: String,  // optional; for future recording storage
-  
+  searchText: {
+    type: String,
+    index: true,
+  }
 }, { timestamps: true });
 
 // Indexes
+meetingSchema.index({ organization: 1 });
 meetingSchema.index({ organizationId: 1, projectId: 1 });
 meetingSchema.index({ hostId: 1 });
 meetingSchema.index({ scheduledAt: 1 });
 
+// Middleware to populate searchText for future search index
+meetingSchema.pre('save', function(next) {
+  this.searchText = `${this.title} ${this.description || ''} ${this.agenda || ''}`.trim().toLowerCase();
+  next();
+});
+
+meetingSchema.plugin(softDeletePlugin);
+
 module.exports = mongoose.model('Meeting', meetingSchema);
+

@@ -10,11 +10,11 @@ const registerUser = async (data) => {
         throw new Error('User already exists');
     }
 
-    // fallback for standalone MongoDB (no transactions)
     let user = null;
     try {
         const Organization = require('../models/Organization');
         const Role = require('../models/Role');
+        const OrganizationMember = require('../models/OrganizationMember');
         
         user = await User.create({ name, email, password, roleName: 'OrgOwner' });
 
@@ -40,14 +40,21 @@ const registerUser = async (data) => {
             { name: 'Guest', description: 'External guest', isSystem: true, permissions: ['view_assigned_tasks'], organization: organization._id }
         ]);
 
+        // Create member mapping
+        await OrganizationMember.create({
+            organization: organization._id,
+            user: user._id,
+            role: 'OrgOwner',
+            status: 'active'
+        });
+
         user.organizationId = organization._id;
+        user.organization = organization._id;
         user.role = orgOwnerRole._id;
         await user.save();
 
         return user;
     } catch (error) {
-        // Basic cleanup if user was created but org failed
-        // Note: In production with ReplicaSet, transactions are preferred
         if (user) {
             await User.findByIdAndDelete(user._id);
         }

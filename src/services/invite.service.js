@@ -1,6 +1,7 @@
-const Invite = require('../models/Invite');
+const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const Organization = require('../models/Organization');
+const OrganizationMember = require('../models/OrganizationMember');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
@@ -8,11 +9,11 @@ const sendInvite = async (organizationId, senderId, email, role) => {
     // Generate token
     const token = crypto.randomBytes(32).toString('hex');
 
-    // Create invite in DB
-    const invite = await Invite.create({
+    // Create invitation in DB
+    const invite = await Invitation.create({
         email,
         organization: organizationId,
-        sender: senderId,
+        invitedBy: senderId,
         role,
         token,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
@@ -53,7 +54,7 @@ const sendInvite = async (organizationId, senderId, email, role) => {
 };
 
 const acceptInvite = async (token, userId) => {
-    const invite = await Invite.findOne({ token, status: 'pending' });
+    const invite = await Invitation.findOne({ token, status: 'pending' });
     if (!invite) throw new Error('Invalid or expired invitation token');
 
     if (invite.expiresAt < new Date()) {
@@ -65,13 +66,29 @@ const acceptInvite = async (token, userId) => {
     const organization = await Organization.findById(invite.organization);
     if (!organization) throw new Error('Organization not found');
 
-    // Add user to organization
-    organization.members.push({ user: userId, role: invite.role });
-    await organization.save();
+    // Create OrganizationMember record
+    const existingMember = await OrganizationMember.findOne({
+        organization: invite.organization,
+        user: userId
+    });
+
+    if (!existingMember) {
+        await OrganizationMember.create({
+            organization: invite.organization,
+            user: userId,
+            role: invite.role,
+            status: 'active'
+        });
+    } else {
+        existingMember.status = 'active';
+        existingMember.role = invite.role;
+        await existingMember.save();
+    }
 
     // Update user record
     await User.findByIdAndUpdate(userId, {
         organizationId: invite.organization,
+        organization: invite.organization,
         role: invite.role,
     });
 
@@ -86,3 +103,4 @@ module.exports = {
     sendInvite,
     acceptInvite,
 };
+

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const softDeletePlugin = require('../utils/softDelete.plugin');
 
 const boardSchema = new mongoose.Schema(
     {
@@ -17,6 +18,19 @@ const boardSchema = new mongoose.Schema(
             ref: 'Project',
             required: true,
         },
+        organization: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Organization',
+            required: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
         columns: [
             {
                 name: { type: String, required: true },
@@ -30,6 +44,12 @@ const boardSchema = new mongoose.Schema(
     }
 );
 
+boardSchema.index({ organization: 1 });
+boardSchema.index({ organization: 1, project: 1 });
+
+boardSchema.plugin(softDeletePlugin);
+
 const Board = mongoose.model('Board', boardSchema);
 
 module.exports = Board;
+

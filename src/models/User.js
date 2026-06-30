@@ -28,6 +28,21 @@ const userSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Organization',
         },
+        organization: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Organization',
+        },
+        authStrategy: {
+            type: String,
+            enum: ['local', 'google', 'azure', 'okta'],
+            default: 'local',
+        },
+        teams: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Team',
+            },
+        ],
         role: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Role'
@@ -57,6 +72,10 @@ const userSchema = new mongoose.Schema(
         timestamps: true,
     }
 );
+
+userSchema.index({ organizationId: 1 });
+userSchema.index({ organization: 1 });
+
 
 // Match user entered password to hashed password in database
 userSchema.methods.matchPassword = async function (enteredPassword) {

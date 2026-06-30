@@ -17,21 +17,36 @@ The AI integration prioritizes local, free inference. It runs a local Ollama ins
 - **Billing:** Cashfree Payment Gateway, synchronized asynchronously via webhooks.
 - **Automation Pipeline:** Centralized, fire-and-forget webhook dispatcher (`webhook.service.js`) communicating with an external n8n instance.
 
-## The AI Prompt & Data Structure
+## Structured Function-Calling Layer
 
-Rather than native OpenAI function-calling, the backend achieves determinism through structured prompt engineering and Regex-based intent detection (`create_project`, `create_issue`, `estimate_issue`). 
+To translate natural-language commands into deterministic backend actions, the AI copilot leverages a **structured function-calling layer** (following the OpenAI tool-calling specification). This allows the LLM to map user intent directly to specific backend functions with validated schemas.
 
-**System Prompt Architecture:**
-The AI assumes a hybrid persona (Senior Architect + Scrum Master). When generating an issue summary or estimating story points, it receives a prompt demanding a strict JSON response. Example request flow for `createIssue`:
-1. User prompt: "Make a task to implement auth."
-2. `ai.controller.js` routes this to the local Ollama instance with `format: 'json'`.
-3. The LLM returns a structured JSON payload (`{ title: '...', description: '...', type: 'Task', ... }`).
-4. The controller creates the MongoDB `Issue` natively.
+**Defined Tools / Functions:**
+The backend defines a suite of JSON Schema tools, including:
+- `createTask`: Extracts title, description, assignee, and priority from the prompt to generate a new Jira-style issue.
+- `moveDeadline`: Identifies task IDs and parsed date entities to adjust sprint timelines.
+- `estimate_issue`: Analyzes the complexity of a task to assign story points.
+
+**Example Request Flow:**
+1. **User prompt:** "Make a task to implement auth and assign it to John."
+2. **LLM Routing:** `ai.controller.js` sends the prompt and the tool schemas to the model (acting as a function-calling endpoint).
+3. **Tool Invocation:** The LLM returns a structured tool call payload:
+   ```json
+   {
+     "name": "createTask",
+     "arguments": {
+       "title": "Implement Authentication",
+       "assignee": "John",
+       "type": "Task"
+     }
+   }
+   ```
+4. **Execution:** The backend validates the arguments, triggers the corresponding controller logic to create the MongoDB `Issue`, and returns the success status to the client.
 
 ## Response Validation & Error Handling
 
-- **LLM Failover:** The `ai.service.js` automatically catches `ECONNREFUSED` or fetch failures on the local Ollama instance and reroutes the payload to Gemini `2.5-flash`. If that hits a rate limit (429), it cascades down to `2.0-flash`.
-- **JSON Recovery:** If the LLM returns conversational fluff alongside the JSON, a regex matcher (`/\{[\s\S]*\}/`) strips the markdown and salvages the payload.
+- **LLM Failover:** The `ai.service.js` automatically catches `ECONNREFUSED` or fetch failures on the primary model instance and reroutes the payload to fallback models (e.g., Gemini `2.5-flash`). If that hits a rate limit (429), it cascades down to `2.0-flash`.
+- **Function-Call Recovery:** If the LLM hallucinates an undefined function or provides arguments that fail schema validation, a fallback logic layer catches the mismatch, attempts a single deterministic retry, and finally returns a safe error to the client if needed.
 - **n8n Resiliency:** Webhooks dispatched to n8n are configured with strict 3-second timeouts in a try/catch block. If n8n is down, the system logs the failure and continues processing the user request uninterrupted, ensuring background automation never breaks the main SaaS experience.
 
 ## Getting Started

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const softDeletePlugin = require('../utils/softDelete.plugin');
 
 const issueSchema = new mongoose.Schema(
     {
@@ -45,6 +46,14 @@ const issueSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
         },
         sprint: {
             type: mongoose.Schema.Types.ObjectId,
@@ -98,6 +107,10 @@ const issueSchema = new mongoose.Schema(
                 },
             },
         ],
+        searchText: {
+            type: String,
+            index: true,
+        }
     },
     {
         timestamps: true,
@@ -105,12 +118,22 @@ const issueSchema = new mongoose.Schema(
 );
 
 // Indexes for performance optimization
+issueSchema.index({ organization: 1 });
 issueSchema.index({ project: 1 }); // Quickly fetch all issues in a project
 issueSchema.index({ project: 1, status: 1 }); // Used in Board column views
 issueSchema.index({ sprint: 1 }); // Used for sprint filtering
 issueSchema.index({ assignee: 1 }); // Workload queries
 issueSchema.index({ key: 1 }, { unique: true }); // Fast key lookup
 
+// Middleware to populate searchText for future search index
+issueSchema.pre('save', function(next) {
+    this.searchText = `${this.key || ''} ${this.title} ${this.description || ''} ${this.status} ${this.priority}`.trim().toLowerCase();
+    next();
+});
+
+issueSchema.plugin(softDeletePlugin);
+
 const Issue = mongoose.model('Issue', issueSchema);
 
 module.exports = Issue;
+

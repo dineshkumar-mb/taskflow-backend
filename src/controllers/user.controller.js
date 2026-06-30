@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Organization = require('../models/Organization');
+const OrganizationMember = require('../models/OrganizationMember');
 
 const getMe = async (req, res) => {
     try {
@@ -42,8 +43,16 @@ const inviteMember = async (req, res) => {
             $addToSet: { members: { user: userToInvite._id, role } },
         });
 
+        // Add to OrganizationMember collection
+        await OrganizationMember.findOneAndUpdate(
+            { organization: organizationId, user: userToInvite._id },
+            { role, status: 'active' },
+            { upsert: true, new: true }
+        );
+
         // Update user's org
         userToInvite.organizationId = organizationId;
+        userToInvite.organization = organizationId;
         userToInvite.role = role;
         await userToInvite.save();
 
@@ -68,7 +77,10 @@ const removeMember = async (req, res) => {
             $pull: { members: { user: userId } },
         });
 
-        await User.findByIdAndUpdate(userId, { $unset: { organizationId: '' } });
+        // Delete from OrganizationMember collection
+        await OrganizationMember.findOneAndDelete({ organization: organizationId, user: userId });
+
+        await User.findByIdAndUpdate(userId, { $unset: { organizationId: '', organization: '' } });
 
         res.json({ message: 'Member removed from organization.' });
     } catch (error) {
@@ -98,10 +110,55 @@ const searchUsers = async (req, res) => {
     }
 };
 
+const switchWorkspace = async (req, res) => {
+    try {
+        const { organizationId } = req.body;
+        if (!organizationId) {
+            return res.status(400).json({ message: 'Organization ID is required' });
+        }
+
+        const membership = await OrganizationMember.findOne({
+            organization: organizationId,
+            user: req.user._id,
+            status: 'active'
+        });
+
+        if (!membership) {
+            return res.status(403).json({ message: 'You are not an active member of this organization' });
+        }
+
+        // Update user active workspace
+        const user = await User.findById(req.user._id);
+        user.organizationId = organizationId;
+        user.organization = organizationId;
+        await user.save();
+
+        const generateToken = require('../utils/generateToken');
+        const { accessToken } = generateToken(res, user);
+
+        res.status(200).json({
+            message: 'Workspace switched successfully',
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                organizationId: user.organizationId,
+                role: user.roleName || user.role,
+                token: accessToken
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     getMe,
     getOrgUsers,
     inviteMember,
     removeMember,
     searchUsers,
+    switchWorkspace,
 };
+
+

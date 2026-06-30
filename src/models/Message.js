@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const softDeletePlugin = require('../utils/softDelete.plugin');
 
 const messageSchema = new mongoose.Schema(
     {
@@ -17,6 +18,19 @@ const messageSchema = new mongoose.Schema(
             required: true,
             trim: true,
         },
+        organization: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Organization',
+            required: true,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        updatedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
         readBy: [
             {
                 type: mongoose.Schema.Types.ObjectId,
@@ -29,9 +43,12 @@ const messageSchema = new mongoose.Schema(
     }
 );
 
-// Index for fast message retrieval within a conversation
+messageSchema.index({ organization: 1 });
 messageSchema.index({ conversation: 1, createdAt: 1 });
+
+messageSchema.plugin(softDeletePlugin);
 
 const Message = mongoose.model('Message', messageSchema);
 
 module.exports = Message;
+

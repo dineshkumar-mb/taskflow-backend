@@ -32,8 +32,18 @@ const organizationSchema = new mongoose.Schema(
         ],
         plan: {
             type: String,
-            enum: ['free', 'pro', 'team'],
+            enum: ['free', 'starter', 'business', 'enterprise'],
             default: 'free',
+        },
+        currentPlan: {
+            type: String,
+            enum: ['free', 'starter', 'business', 'enterprise'],
+            default: 'free',
+        },
+        authStrategy: {
+            type: String,
+            enum: ['local', 'google', 'azure', 'okta'],
+            default: 'local'
         },
         stripeCustomerId: String,
         stripeSubscriptionId: String,

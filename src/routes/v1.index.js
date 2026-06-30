@@ -1,0 +1,44 @@
+const express = require('express');
+const router = express.Router();
+
+const authRoutes = require('./auth.routes');
+const projectRoutes = require('./project.routes');
+const boardRoutes = require('./board.routes');
+const sprintRoutes = require('./sprint.routes');
+const issueRoutes = require('./issue.routes');
+const commentRoutes = require('./comment.routes');
+const userRoutes = require('./user.routes');
+const notificationRoutes = require('./notification.routes');
+const aiRoutes = require('./ai.routes');
+const chatRoutes = require('./chat.routes');
+const billingRoutes = require('./billing.routes');
+const inviteRoutes = require('./invite.routes');
+const analyticsRoutes = require('./analytics.routes');
+const debugRoutes = require('./debug.routes');
+const meetingRoutes = require('./meeting.routes');
+const roleRoutes = require('./role.routes');
+const auditRoutes = require('./audit.routes');
+const webhookRoutes = require('./webhook.routes');
+const healthRoutes = require('./health.routes');
+
+router.use('/health', healthRoutes);
+router.use('/auth', authRoutes);
+router.use('/projects', projectRoutes);
+router.use('/boards', boardRoutes);
+router.use('/sprints', sprintRoutes);
+router.use('/issues', issueRoutes);
+router.use('/comments', commentRoutes);
+router.use('/users', userRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/ai', aiRoutes);
+router.use('/chat', chatRoutes);
+router.use('/billing', billingRoutes);
+router.use('/invites', inviteRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/debug', debugRoutes);
+router.use('/meetings', meetingRoutes);
+router.use('/roles', roleRoutes);
+router.use('/audit', auditRoutes);
+router.use('/webhooks', webhookRoutes);
+
+module.exports = router;

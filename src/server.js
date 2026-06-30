@@ -69,45 +69,9 @@ app.use((req, res, next) => {
 connectDB();
 
 // Routes
-const authRoutes = require('./routes/auth.routes');
-const projectRoutes = require('./routes/project.routes');
-const boardRoutes = require('./routes/board.routes');
-const sprintRoutes = require('./routes/sprint.routes');
-const issueRoutes = require('./routes/issue.routes');
-const commentRoutes = require('./routes/comment.routes');
-const userRoutes = require('./routes/user.routes');
-const notificationRoutes = require('./routes/notification.routes');
-const aiRoutes = require('./routes/ai.routes');
-const chatRoutes = require('./routes/chat.routes');
-const billingRoutes = require('./routes/billing.routes');
-const inviteRoutes = require('./routes/invite.routes');
-const analyticsRoutes = require('./routes/analytics.routes');
-const debugRoutes = require('./routes/debug.routes');
-const meetingRoutes = require('./routes/meeting.routes');
-const roleRoutes = require('./routes/role.routes');
-const auditRoutes = require('./routes/audit.routes');
-
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/boards', boardRoutes);
-app.use('/api/sprints', sprintRoutes);
-app.use('/api/issues', issueRoutes);
-app.use('/api/comments', commentRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/billing', billingRoutes);
-app.use('/api/invites', inviteRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/debug', debugRoutes);
-app.use('/api/meetings', meetingRoutes);
-app.use('/api/roles', roleRoutes);
-app.use('/api/audit', auditRoutes);
-
-// Webhook routes
-const webhookRoutes = require('./routes/webhook.routes');
-app.use('/api/webhooks', webhookRoutes);
+const v1Router = require('./routes/v1.index');
+app.use('/api/v1', v1Router);
+app.use('/api', v1Router);
 
 app.get('/', (req, res) => {
     res.send('API is running...');
@@ -119,6 +83,9 @@ socketMainHandler(io);
 // Initialize Cron Jobs
 const initStandupCron = require('./cron/standup.cron');
 initStandupCron();
+
+const { initReconciliationCron } = require('./cron/reconcile.cron');
+initReconciliationCron();
 
 const PORT = process.env.PORT || 5000;
 
