@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const subscriptionSchema = new mongoose.Schema({
     organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true, unique: true, index: true },
-    plan: { type: String, enum: ['free', 'starter', 'business', 'enterprise'], default: 'free' },
+    plan: { type: String, enum: ['free', 'pro', 'team', 'starter', 'business', 'enterprise'], default: 'free' },
     status: { type: String, enum: ['active', 'past_due', 'canceled', 'ACTIVE', 'CANCELLED'], default: 'active' },
     startDate: { type: Date, default: Date.now },
     renewalDate: { type: Date },

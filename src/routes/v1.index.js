@@ -20,6 +20,7 @@ const roleRoutes = require('./role.routes');
 const auditRoutes = require('./audit.routes');
 const webhookRoutes = require('./webhook.routes');
 const healthRoutes = require('./health.routes');
+const adminRoutes = require('./admin.routes');
 
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
@@ -40,5 +41,6 @@ router.use('/meetings', meetingRoutes);
 router.use('/roles', roleRoutes);
 router.use('/audit', auditRoutes);
 router.use('/webhooks', webhookRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;

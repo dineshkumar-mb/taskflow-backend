@@ -32,12 +32,12 @@ const organizationSchema = new mongoose.Schema(
         ],
         plan: {
             type: String,
-            enum: ['free', 'starter', 'business', 'enterprise'],
+            enum: ['free', 'pro', 'team', 'starter', 'business', 'enterprise'],
             default: 'free',
         },
         currentPlan: {
             type: String,
-            enum: ['free', 'starter', 'business', 'enterprise'],
+            enum: ['free', 'pro', 'team', 'starter', 'business', 'enterprise'],
             default: 'free',
         },
         authStrategy: {

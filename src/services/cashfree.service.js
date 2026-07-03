@@ -16,14 +16,14 @@ const getHeaders = () => ({
     'Content-Type': 'application/json'
 });
 
-const ensurePlanExists = async (planId) => {
+const ensurePlanExists = async (planId, planName, amount) => {
     const planPayload = {
         plan_id: planId,
-        plan_name: 'TaskFlow Pro Monthly',
+        plan_name: planName,
         plan_type: 'PERIODIC',
         plan_currency: 'INR',
-        plan_max_amount: 1000,
-        plan_recurring_amount: 199,
+        plan_max_amount: Math.round(amount * 1.5),
+        plan_recurring_amount: Math.round(amount),
         plan_intervals: 1,
         plan_interval_type: 'MONTH'
     };
@@ -36,12 +36,46 @@ const ensurePlanExists = async (planId) => {
     }
 };
 
-const createSubscription = async (organizationId, userEmail, userPhone, userName) => {
+const createSubscription = async (organizationId, userEmail, userPhone, userName, plan = 'pro', couponCode = null) => {
     const organization = await Organization.findById(organizationId);
     if (!organization) throw new Error('Organization not found');
 
-    const planId = process.env.CASHFREE_PLAN_ID || 'taskflow_pro_monthly';
-    await ensurePlanExists(planId);
+    // Base price mapping
+    const planPrices = {
+        pro: 199,
+        team: 499
+    };
+    const basePrice = planPrices[plan] || 199;
+    let finalPrice = basePrice;
+    let appliedCoupon = null;
+
+    if (couponCode) {
+        const Coupon = require('../models/Coupon');
+        const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+        if (coupon && coupon.isValid()) {
+            appliedCoupon = coupon;
+            if (coupon.discountType === 'percentage') {
+                finalPrice = basePrice * (1 - coupon.discountValue / 100);
+            } else if (coupon.discountType === 'flat') {
+                finalPrice = Math.max(0, basePrice - coupon.discountValue);
+            }
+            finalPrice = Math.round(finalPrice);
+        }
+    }
+
+    // Generate Plan ID
+    let planId;
+    let planName;
+    if (appliedCoupon) {
+        planId = `tf_${plan}_${appliedCoupon.code.toLowerCase()}`;
+        planName = `TaskFlow ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${appliedCoupon.code})`;
+    } else {
+        planId = `taskflow_${plan}_monthly`;
+        planName = `TaskFlow ${plan.charAt(0).toUpperCase() + plan.slice(1)} Monthly`;
+    }
+
+    // Ensure plan exists on Cashfree
+    await ensurePlanExists(planId, planName, finalPrice);
 
     const subscriptionId = `sub_${organizationId}_${Date.now()}`;
     const customerPhone = userPhone || '9999999999';
@@ -67,7 +101,14 @@ const createSubscription = async (organizationId, userEmail, userPhone, userName
         
         organization.cashfreeSubscriptionId = subscriptionId;
         organization.cashfreePlanId = planId;
+        organization.plan = plan; // Pre-emptively set selection
         await organization.save();
+
+        // Increment redemption count if coupon was used
+        if (appliedCoupon) {
+            appliedCoupon.redemptionsCount += 1;
+            await appliedCoupon.save();
+        }
 
         return {
             subscriptionId: response.data.subscription_id,

@@ -5,6 +5,10 @@ const connectDB = async () => {
         if (!process.env.MONGO_URI) throw new Error('MONGO_URI is not defined in .env');
         const conn = await mongoose.connect(process.env.MONGO_URI);
         console.log(`MongoDB Connected: ${conn.connection.host}`);
+        
+        // Seed SuperAdmin on connection
+        const { seedSuperAdmin } = require('../utils/seeder');
+        await seedSuperAdmin();
     } catch (error) {
         console.error(`Error: ${error.message}`);
         process.exit(1);

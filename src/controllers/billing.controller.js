@@ -4,12 +4,17 @@ const Project = require('../models/Project');
 
 const createCheckoutSession = async (req, res) => {
     try {
-        const { planPriceId } = req.body;
+        const { plan, couponCode } = req.body;
+        // Default to 'pro' if not provided for backward compatibility
+        const selectedPlan = plan || 'pro';
+
         const result = await cashfreeService.createSubscription(
             req.user.organizationId,
             req.user.email,
             req.user.phone,
-            req.user.name
+            req.user.name,
+            selectedPlan,
+            couponCode
         );
         res.json({ subscription_session_id: result.subscription_session_id });
     } catch (error) {
@@ -19,16 +24,72 @@ const createCheckoutSession = async (req, res) => {
 };
 
 const createPortalSession = async (req, res) => {
-    // Cashfree does not have a native portal session like Stripe.
-    // If a user wants to manage their subscription, we usually redirect to Cashfree Subscription Management link 
-    // or provide an internal UI calling Cashfree APIs.
     res.json({ url: `${process.env.CLIENT_URL}/billing?manage=true` });
+};
+
+const validateCoupon = async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) {
+            return res.status(400).json({ valid: false, message: 'Coupon code is required' });
+        }
+
+        const Coupon = require('../models/Coupon');
+        const coupon = await Coupon.findOne({ code: code.toUpperCase() });
+
+        if (!coupon || !coupon.isValid()) {
+            return res.status(400).json({ valid: false, message: 'Invalid or expired coupon' });
+        }
+
+        res.json({
+            valid: true,
+            coupon: {
+                code: coupon.code,
+                discountType: coupon.discountType,
+                discountValue: coupon.discountValue
+            }
+        });
+    } catch (error) {
+        console.error('Coupon validation error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+// Returns all active, valid coupons for display on the user-facing checkout screen
+const getActiveCoupons = async (req, res) => {
+    try {
+        const Coupon = require('../models/Coupon');
+        const now = new Date();
+
+        const coupons = await Coupon.find({
+            active: true,
+            $or: [
+                { expiryDate: null },
+                { expiryDate: { $gt: now } }
+            ]
+        }).select('code discountType discountValue expiryDate maxRedemptions redemptionsCount');
+
+        // Filter out exhausted coupons
+        const available = coupons.filter(c => 
+            c.maxRedemptions === null || c.redemptionsCount < c.maxRedemptions
+        ).map(c => ({
+            code: c.code,
+            discountType: c.discountType,
+            discountValue: c.discountValue,
+            expiryDate: c.expiryDate
+        }));
+
+        res.json(available);
+    } catch (error) {
+        console.error('Get active coupons error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
 };
 
 const handleCashfreeWebhook = async (req, res) => {
     try {
         const signature = req.headers['x-webhook-signature'];
-        const rawBody = JSON.stringify(req.body); // In Express, we need raw body for accurate signature. Assuming app.use(express.json()) is handled.
+        const rawBody = JSON.stringify(req.body);
 
         if (!signature || !cashfreeService.verifyWebhookSignature(signature, rawBody)) {
             return res.status(400).send('Invalid signature');
@@ -43,10 +104,25 @@ const handleCashfreeWebhook = async (req, res) => {
             if (status === 'ACTIVE') {
                 const org = await Organization.findOne({ cashfreeSubscriptionId: subId });
                 if (org) {
-                    org.plan = 'pro';
+                    const planId = data.subscription_details.plan_details?.plan_id || '';
+                    const planType = planId.includes('team') ? 'team' : 'pro';
+
+                    org.plan = planType;
                     org.subscriptionStatus = 'ACTIVE';
                     await org.save();
-                    console.log(`Upgraded org ${org._id} to PRO based on Cashfree webhook.`);
+
+                    const Subscription = require('../models/Subscription');
+                    await Subscription.findOneAndUpdate(
+                        { organization: org._id },
+                        {
+                            plan: planType,
+                            status: 'ACTIVE',
+                            paymentProvider: 'cashfree',
+                            paymentProviderId: subId
+                        },
+                        { upsert: true, new: true }
+                    );
+                    console.log(`Upgraded org ${org._id} to ${planType.toUpperCase()} based on Cashfree webhook.`);
                 }
             } else if (status === 'CANCELLED' || status === 'EXPIRED') {
                 const org = await Organization.findOne({ cashfreeSubscriptionId: subId });
@@ -54,6 +130,18 @@ const handleCashfreeWebhook = async (req, res) => {
                     org.plan = 'free';
                     org.subscriptionStatus = status;
                     await org.save();
+
+                    const Subscription = require('../models/Subscription');
+                    await Subscription.findOneAndUpdate(
+                        { organization: org._id },
+                        {
+                            plan: 'free',
+                            status: status === 'CANCELLED' ? 'CANCELLED' : 'canceled',
+                            paymentProvider: 'cashfree',
+                            paymentProviderId: subId
+                        },
+                        { upsert: true, new: true }
+                    );
                     console.log(`Downgraded org ${org._id} to FREE based on Cashfree webhook.`);
                 }
             }
@@ -100,4 +188,7 @@ module.exports = {
     createPortalSession,
     getUsage,
     handleCashfreeWebhook,
+    validateCoupon,
+    getActiveCoupons,
 };
+
