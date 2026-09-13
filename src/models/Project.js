@@ -59,9 +59,8 @@ const projectSchema = new mongoose.Schema(
 projectSchema.index({ organization: 1 });
 
 // Middleware to populate searchText for future search index
-projectSchema.pre('save', function(next) {
+projectSchema.pre('save', function() {
     this.searchText = `${this.name} ${this.key} ${this.description || ''}`.trim().toLowerCase();
-    next();
 });
 
 projectSchema.plugin(softDeletePlugin);

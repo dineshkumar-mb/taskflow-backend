@@ -126,9 +126,8 @@ issueSchema.index({ assignee: 1 }); // Workload queries
 issueSchema.index({ key: 1 }, { unique: true }); // Fast key lookup
 
 // Middleware to populate searchText for future search index
-issueSchema.pre('save', function(next) {
+issueSchema.pre('save', function() {
     this.searchText = `${this.key || ''} ${this.title} ${this.description || ''} ${this.status} ${this.priority}`.trim().toLowerCase();
-    next();
 });
 
 issueSchema.plugin(softDeletePlugin);

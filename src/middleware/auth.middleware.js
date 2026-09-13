@@ -42,9 +42,16 @@ const authorize = (...roles) => {
         if (!req.user) {
             return res.status(401).json({ message: 'User not authenticated' });
         }
-        if (!roles.includes(req.user.role)) {
+        
+        const effectiveRole = req.user.roleName ||
+          (typeof req.user.role === 'string' ? req.user.role : req.user.role?.name) ||
+          'Member';
+
+        if (roles.length > 0 && 
+            !roles.includes(effectiveRole) && 
+            !['SuperAdmin', 'OrgOwner', 'Admin'].includes(effectiveRole)) {
             return res.status(403).json({
-                message: `User role ${req.user.role} is not authorized to access this route`
+                message: `User role ${effectiveRole} is not authorized to access this route`
             });
         }
         next();

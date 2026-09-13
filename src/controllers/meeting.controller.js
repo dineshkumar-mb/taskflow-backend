@@ -3,6 +3,7 @@ const Transcript = require('../models/Transcript');
 const Issue = require('../models/Issue');
 const Activity = require('../models/Activity');
 const User = require('../models/User');
+const issueService = require('../services/issue.service');
 const { sendEmail } = require('../services/email.service');
 const { generateMOMFromTranscript } = require('../services/ai.service');
 
@@ -29,6 +30,7 @@ exports.createMeeting = async (req, res) => {
       agenda,
       scheduledAt,
       organizationId: req.user.organizationId,
+      organization: req.user.organizationId,
       projectId,
       sprintId,
       hostId,
@@ -194,39 +196,57 @@ exports.endMeeting = async (req, res) => {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
+    // Filter valid mongo IDs for attendedIds
+    const validAttendeeIds = (attendeeIds || [])
+      .filter(id => id && typeof id === 'string' && id.match(/^[0-9a-fA-F]{24}$/));
+    
+    if (validAttendeeIds.length === 0 && req.user && req.user._id) {
+      validAttendeeIds.push(req.user._id);
+    }
+
     // Update meeting
     meeting.status = 'ended';
-    meeting.attendedIds = attendeeIds;
+    meeting.attendedIds = validAttendeeIds;
     const now = new Date();
-    const duration = Math.floor((now - meeting.scheduledAt) / 60000); // minutes
+    const duration = Math.max(0, Math.floor((now - new Date(meeting.scheduledAt)) / 60000)); // minutes
     meeting.duration = duration;
 
     // Save transcript segments
-    const transcript = await Transcript.findOne({ meetingId });
-    if (transcript) {
+    let transcript = await Transcript.findOne({ meetingId });
+    if (!transcript) {
+      transcript = new Transcript({ meetingId, segments: [] });
+    }
+    
+    if (transcriptSegments && Array.isArray(transcriptSegments) && transcriptSegments.length > 0) {
       transcript.segments = transcriptSegments;
       transcript.fullText = transcriptSegments.map(s => s.text).join(' ');
-      await transcript.save();
-      meeting.transcriptRaw = transcript.fullText;
+    } else if (!transcript.fullText) {
+      transcript.fullText = '';
     }
-
+    
+    await transcript.save();
+    meeting.transcriptRaw = transcript.fullText || '';
     await meeting.save();
 
-    // Log activity
-    await Activity.create({
-      organizationId: meeting.organizationId,
-      projectId: meeting.projectId,
-      user: req.user._id,
-      meetingId: meeting._id,
-      type: 'meeting_ended',
-      metadata: {
-        meetingTitle: meeting.title,
-        duration: duration,
-        attendeeCount: attendeeIds.length
-      }
-    });
+    // Log activity safely
+    try {
+      await Activity.create({
+        organizationId: meeting.organizationId || req.user.organizationId,
+        projectId: meeting.projectId,
+        user: req.user._id,
+        meetingId: meeting._id,
+        type: 'meeting_ended',
+        metadata: {
+          meetingTitle: meeting.title,
+          duration: duration,
+          attendeeCount: validAttendeeIds.length
+        }
+      });
+    } catch (actErr) {
+      console.warn('Activity logging warning on end meeting:', actErr.message);
+    }
 
-    res.json({ success: true, message: 'Meeting ended', meeting });
+    return res.status(200).json({ success: true, message: 'Meeting ended successfully', meeting });
   } catch (error) {
     console.error('Error ending meeting:', error);
     res.status(500).json({ error: error.message });
@@ -237,31 +257,65 @@ exports.endMeeting = async (req, res) => {
 exports.generateMOM = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await Meeting.findById(meetingId);
+    const meeting = await Meeting.findById(meetingId)
+      .populate('participantIds', 'name email')
+      .populate('hostId', 'name email');
 
-    if (!meeting || !meeting.transcriptRaw) {
-      return res.status(400).json({ error: 'Meeting or transcript not found' });
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const rawText = meeting.transcriptRaw && meeting.transcriptRaw.trim() 
+      ? meeting.transcriptRaw 
+      : `Meeting Title: ${meeting.title}. Agenda: ${meeting.agenda || 'General project update and task sync'}.`;
+
+    const participants = [];
+    if (meeting.participantIds && Array.isArray(meeting.participantIds)) {
+      meeting.participantIds.forEach(p => {
+        if (p && p._id) participants.push({ _id: p._id, name: p.name, email: p.email });
+      });
+    }
+    if (meeting.hostId && meeting.hostId._id) {
+      if (!participants.some(p => p._id.toString() === meeting.hostId._id.toString())) {
+        participants.push({ _id: meeting.hostId._id, name: meeting.hostId.name, email: meeting.hostId.email });
+      }
     }
 
     // Call AI service to generate MOM
     const momData = await generateMOMFromTranscript(
-      meeting.transcriptRaw,
+      rawText,
       meeting.agenda,
-      meeting.participantIds
+      participants
     );
 
     // Store MOM in meeting record (not confirmed yet)
     meeting.mom = {
       summary: momData.summary,
       decisions: momData.decisions,
-      actionItems: momData.actionItems.map(item => ({
-        title: item.title,
-        description: item.description,
-        assigneeId: item.assigneeId || meeting.hostId,
-        priority: item.priority || 'Medium',
-        dueDate: item.dueDate,
-        completed: false
-      })),
+      actionItems: (momData.actionItems || []).map(item => {
+        let assigneeId = item.assigneeId;
+        let matchedPart = null;
+        if (assigneeId) {
+          matchedPart = participants.find(p => p._id.toString() === assigneeId.toString());
+        }
+        if (!matchedPart && item.assigneeName) {
+          matchedPart = participants.find(p => p.name && p.name.toLowerCase().includes(item.assigneeName.toLowerCase()));
+        }
+        const hostObjId = meeting.hostId?._id || meeting.hostId;
+        const hostName = meeting.hostId?.name || 'Host';
+        const finalAssignee = matchedPart ? matchedPart._id : hostObjId;
+        const finalName = matchedPart ? matchedPart.name : (item.assigneeName || hostName);
+
+        return {
+          title: item.title,
+          description: item.description,
+          assigneeId: finalAssignee,
+          assigneeName: finalName,
+          priority: item.priority || 'Medium',
+          dueDate: item.dueDate ? new Date(item.dueDate) : null,
+          completed: false
+        };
+      }),
       generatedAt: new Date()
     };
 
@@ -277,7 +331,7 @@ exports.generateMOM = async (req, res) => {
       metadata: {
         meetingTitle: meeting.title,
         momSummary: momData.summary,
-        actionItemsCount: momData.actionItems.length
+        actionItemsCount: (momData.actionItems || []).length
       }
     });
 
@@ -302,39 +356,75 @@ exports.confirmAndSendMOM = async (req, res) => {
       return res.status(400).json({ error: 'Meeting or MOM not found' });
     }
 
+    const hostId = meeting.hostId?._id || meeting.hostId;
+
     // Update MOM if edited
     if (updatedMOM) {
       meeting.mom.summary = updatedMOM.summary || meeting.mom.summary;
       meeting.mom.decisions = updatedMOM.decisions || meeting.mom.decisions;
-      meeting.mom.actionItems = updatedMOM.actionItems || meeting.mom.actionItems;
+      if (updatedMOM.actionItems) {
+        meeting.mom.actionItems = updatedMOM.actionItems.map(item => {
+          const rawAssignee = item.assigneeId?._id || item.assigneeId || hostId;
+          return {
+            title: item.title,
+            description: item.description,
+            assigneeId: rawAssignee,
+            assigneeName: item.assigneeName || '',
+            priority: item.priority || 'Medium',
+            dueDate: item.dueDate ? new Date(item.dueDate) : null,
+            completed: false
+          };
+        });
+      }
     }
 
     meeting.mom.confirmedAt = new Date();
     await meeting.save();
 
-    // 1. Send MOM email to all participants and host
-    const allAttendees = [...meeting.participantIds, meeting.hostId];
-    const emailPromises = allAttendees.map(participant =>
-      sendMOMEmail(meeting, participant)
-    );
-    await Promise.all(emailPromises);
+    // 1. Send MOM email to all participants and host (safely with Promise.allSettled)
+    const allAttendeesMap = new Map();
+    if (Array.isArray(meeting.participantIds)) {
+      meeting.participantIds.forEach(p => { if (p && p.email) allAttendeesMap.set(p._id.toString(), p); });
+    }
+    if (meeting.hostId && meeting.hostId.email) {
+      allAttendeesMap.set(meeting.hostId._id.toString(), meeting.hostId);
+    }
+    const uniqueAttendees = Array.from(allAttendeesMap.values());
 
-    // 2. Create Issues for each action item
+    await Promise.allSettled(uniqueAttendees.map(participant =>
+      sendMOMEmail(meeting, participant).catch(err => {
+        console.warn(`Failed to send MOM email to ${participant.email}:`, err.message);
+      })
+    ));
+
+    // 2. Create Issues for each action item using issueService
+    const orgId = meeting.organizationId;
+
     for (const actionItem of meeting.mom.actionItems) {
-      const issue = new Issue({
-        title: actionItem.title,
-        description: actionItem.description,
-        project: meeting.projectId,
-        sprint: meeting.sprintId,
-        assignee: actionItem.assigneeId,
-        priority: actionItem.priority ? actionItem.priority.toLowerCase() : 'medium',
-        dueDate: actionItem.dueDate,
-        status: 'todo',
-        organization: meeting.organizationId,
-        reporter: meeting.hostId
-      });
-      const savedIssue = await issue.save();
-      actionItem.createdIssueId = savedIssue._id;
+      if (!actionItem.createdIssueId) {
+        try {
+          const targetAssignee = actionItem.assigneeId?._id || actionItem.assigneeId || hostId;
+          const createdIssue = await issueService.createIssue(
+            hostId,
+            orgId,
+            {
+              title: actionItem.title || 'Meeting Action Item',
+              description: actionItem.description || `Action item from meeting: ${meeting.title}`,
+              project: meeting.projectId,
+              sprint: meeting.sprintId || undefined,
+              assignee: targetAssignee,
+              priority: actionItem.priority ? actionItem.priority.toLowerCase() : 'medium',
+              dueDate: actionItem.dueDate || undefined,
+              status: 'todo',
+              type: 'task'
+            },
+            req.io
+          );
+          actionItem.createdIssueId = createdIssue._id;
+        } catch (err) {
+          console.error('Error creating issue for action item:', err);
+        }
+      }
     }
 
     await meeting.save();
@@ -349,7 +439,7 @@ exports.confirmAndSendMOM = async (req, res) => {
       metadata: {
         meetingTitle: meeting.title,
         actionItemsCount: meeting.mom.actionItems.length,
-        attendeeCount: meeting.participantIds.length
+        attendeeCount: uniqueAttendees.length
       }
     });
 

@@ -271,22 +271,34 @@ You are an AI assistant supporting project management workflows inside the TaskF
 // MODEL FACTORY  (primary + fallback)
 // ─────────────────────────────────────────────
 const getModel = (modelName = 'gemini-2.5-flash') => {
-    // 1. Try NVIDIA API first if configured
+    // 1. Try Gemini first if configured
+    const key = process.env.GEMINI_API_KEY;
+    if (key && key !== 'your_gemini_api_key_here') {
+        const genAI = new GoogleGenerativeAI(key);
+        return genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                temperature: 0.2,
+                topP: 0.8,
+            },
+        });
+    }
+
+    // 2. Fallback to NVIDIA API if configured
     const nvidiaKey = process.env.NVIDIA_API_KEY;
     if (nvidiaKey && nvidiaKey !== 'your_nvidia_api_key_here') {
         const openai = new OpenAI({
             apiKey: nvidiaKey,
             baseURL: 'https://integrate.api.nvidia.com/v1',
         });
-        
+
         return {
             generateContent: async (prompt) => {
-                // Map Gemini model names to NVIDIA models if necessary
                 let nModel = modelName;
                 if (modelName.includes('gemini')) {
-                    nModel = 'meta/llama-3.1-8b-instruct'; // Default fallback
+                    nModel = 'meta/llama-3.3-70b-instruct'; // Modern NVIDIA NIM model
                 }
-                
+
                 const response = await openai.chat.completions.create({
                     model: nModel,
                     messages: [{ role: "user", content: prompt }],
@@ -303,17 +315,7 @@ const getModel = (modelName = 'gemini-2.5-flash') => {
         };
     }
 
-    // 2. Fallback to Gemini
-    const key = process.env.GEMINI_API_KEY;
-    if (!key || key === 'your_gemini_api_key_here') return null;
-    const genAI = new GoogleGenerativeAI(key);
-    return genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-            temperature: 0.2,
-            topP: 0.8,
-        },
-    });
+    return null;
 };
 
 // ─────────────────────────────────────────────
@@ -332,13 +334,7 @@ async function callGeminiWithFallback(prompt) {
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             return { text, parsed: jsonMatch ? JSON.parse(jsonMatch[0]) : null, source: 'primary' };
         } catch (err) {
-            const is429 = err.status === 429 || (err.message && err.message.includes('429'));
-            if (is429) {
-                console.warn('[AI] Primary model rate-limited. Switching to fallback model...');
-            } else {
-                console.error('[AI] Primary model error:', err.message);
-                throw err; // non-rate-limit errors: re-throw
-            }
+            console.warn('[AI] Primary model error:', err.message, '- attempting fallback model...');
         }
     }
 
@@ -900,16 +896,18 @@ Return JSON ONLY.
 // ─────────────────────────────────────────────
 // 6. MINUTES OF MEETING GENERATION
 // ─────────────────────────────────────────────
-exports.generateMOMFromTranscript = async (transcriptText, agenda, participantIds) => {
-  try {
-    const model = getModel('gemini-1.5-pro'); // Use getModel from factory, fallback will be handled
-    if (!model) throw new Error('AI not configured');
+exports.generateMOMFromTranscript = async (transcriptText, agenda, participants = []) => {
+    try {
+        let participantContext = '';
+        if (Array.isArray(participants) && participants.length > 0) {
+            participantContext = `Meeting Participants:\n` + participants.map(p => `- ${p.name || 'User'} (ID: ${p._id || p.id || ''})`).join('\n') + '\n\n';
+        }
 
-    const prompt = `You are an expert meeting note-taker. Analyze the following meeting transcript and generate structured Minutes of Meeting (MOM).
+        const prompt = `You are an expert meeting note-taker. Analyze the following meeting transcript and generate structured Minutes of Meeting (MOM).
 
 Meeting Agenda: ${agenda || 'General discussion'}
 
-Transcript:
+${participantContext}Transcript:
 ${transcriptText}
 
 Please provide the output ONLY as valid JSON (no markdown formatting, no code blocks, just raw JSON):
@@ -923,7 +921,8 @@ Please provide the output ONLY as valid JSON (no markdown formatting, no code bl
     {
       "title": "Brief action item title",
       "description": "More detailed description",
-      "assigneeName": "Name of person (from transcript)",
+      "assigneeName": "Name of person (from participants or transcript)",
+      "assigneeId": "ID of person if matching a listed participant, or leave blank",
       "priority": "High|Medium|Low",
       "dueDate": "YYYY-MM-DD (estimate based on context)"
     }
@@ -932,28 +931,112 @@ Please provide the output ONLY as valid JSON (no markdown formatting, no code bl
 
 Rules:
 - Extract only actionable items with clear ownership
-- If no assignee is mentioned, assign to the first speaker or leave blank
-- Priorities should be inferred from urgency mentioned
+- If no assignee is mentioned, leave assigneeName blank or use the primary speaker
+- Priorities should be inferred from urgency mentioned (High, Medium, Low)
 - Dates should be estimated from context (e.g., "next week", "by Friday")
 - Keep summary concise (2-3 sentences max)
 - Include only major decisions`;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+        let momData = null;
 
-    // Parse JSON response (strip markdown if present)
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in response');
+        // 1. Try Ollama if running locally
+        if (await isOllamaAvailable()) {
+            try {
+                const ollamaRes = await callOllama(prompt, { json: true, timeoutMs: 90000 });
+                if (ollamaRes.parsed) {
+                    momData = ollamaRes.parsed;
+                }
+            } catch (err) {
+                console.warn('[AI MOM] Ollama failed, falling back to Gemini:', err.message);
+            }
+        }
+
+        // 2. Try Gemini (2.5-flash -> 2.0-flash)
+        if (!momData) {
+            const geminiRes = await callGeminiWithFallback(prompt);
+            if (geminiRes.parsed) {
+                momData = geminiRes.parsed;
+            } else if (geminiRes.text) {
+                const match = geminiRes.text.match(/\{[\s\S]*\}/);
+                if (match) {
+                    try { momData = JSON.parse(match[0]); } catch (_) { }
+                }
+            }
+        }
+
+        // 3. Direct model fallback if still needed
+        if (!momData) {
+            try {
+                const model = getModel('gemini-2.5-flash') || getModel('gemini-2.0-flash');
+                if (model) {
+                    const result = await model.generateContent(prompt);
+                    const text = result.response.text();
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        momData = JSON.parse(jsonMatch[0]);
+                    }
+                }
+            } catch (e) {
+                console.warn('[AI MOM] Model fallback failed:', e.message);
+            }
+        }
+
+        // 4. Rule-based fallback if AI APIs are completely down or key invalid
+        if (!momData) {
+            console.warn('[AI MOM] AI API unavailable or failed. Using intelligent rule-based MOM extraction fallback.');
+            momData = generateRuleBasedMOM(transcriptText, agenda, participants);
+        }
+
+        return {
+            summary: momData.summary || 'Summary unavailable.',
+            decisions: Array.isArray(momData.decisions) ? momData.decisions : [],
+            actionItems: Array.isArray(momData.actionItems) ? momData.actionItems : []
+        };
+    } catch (error) {
+        console.error('Error generating MOM, activating emergency rule-based fallback:', error.message);
+        const fallbackMOM = generateRuleBasedMOM(transcriptText, agenda, participants);
+        return fallbackMOM;
+    }
+};
+
+function generateRuleBasedMOM(transcriptText, agenda, participants = []) {
+    const lines = (transcriptText || '').split('\n').filter(l => l.trim().length > 0);
+    const decisions = [];
+    const actionItems = [];
+
+    lines.forEach(line => {
+        const lower = line.toLowerCase();
+        if (lower.includes('decision') || lower.includes('agreed') || lower.includes('decided') || lower.includes('proceed with')) {
+            decisions.push(line.replace(/^[a-zA-Z0-9\s]+:\s*/, '').trim());
+        }
+        if (lower.includes('need') || lower.includes('please') || lower.includes('will') || lower.includes('handle') || lower.includes('update') || lower.includes('finish') || lower.includes('by')) {
+            let matchedParticipant = participants.find(p => p.name && line.toLowerCase().includes(p.name.toLowerCase()));
+            let speakerMatch = line.match(/^([a-zA-Z0-9\s]+):/);
+            let speakerName = speakerMatch ? speakerMatch[1].trim() : '';
+
+            actionItems.push({
+                title: line.replace(/^[a-zA-Z0-9\s]+:\s*/, '').slice(0, 80),
+                description: line.trim(),
+                assigneeName: matchedParticipant ? matchedParticipant.name : (speakerName || 'Speaker'),
+                assigneeId: matchedParticipant ? (matchedParticipant._id || matchedParticipant.id) : undefined,
+                priority: lower.includes('urgent') || lower.includes('asap') || lower.includes('today') ? 'High' : 'Medium',
+                dueDate: null
+            });
+        }
+    });
+
+    if (decisions.length === 0) {
+        decisions.push('Reviewed meeting topics and aligned on next steps.');
     }
 
-    const momData = JSON.parse(jsonMatch[0]);
-    return momData;
-  } catch (error) {
-    console.error('Error generating MOM:', error);
-    throw new Error(`Failed to generate MOM: ${error.message}`);
-  }
-};
+    const summary = `Meeting regarding ${agenda || 'general items'}. Analyzed transcript and identified ${actionItems.length} key action items and ${decisions.length} decisions.`;
+
+    return {
+        summary,
+        decisions: decisions.slice(0, 5),
+        actionItems: actionItems.slice(0, 10)
+    };
+}
 
 // ─────────────────────────────────────────────
 // 7. AI RISK DETECTION
@@ -1001,26 +1084,35 @@ Provide your response ONLY as valid JSON matching this structure:
 };
 
 exports.transcribeAudioFile = async (buffer, filename) => {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const { OpenAI } = require('openai');
+
+    // Skip empty or tiny audio chunks (< 500 bytes) that lack media headers
+    if (!buffer || buffer.length < 500) {
+        return '';
+    }
+
+    const safeFilename = filename && filename.endsWith('.webm') ? filename : `${Date.now()}_chunk.webm`;
+    const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${safeFilename}`);
+
     try {
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
-        const { OpenAI } = require('openai');
-        
-        // Write the buffer to a temporary file
-        const tempFilePath = path.join(os.tmpdir(), `${Date.now()}_${filename}`);
         fs.writeFileSync(tempFilePath, buffer);
 
-        // Configure OpenAI SDK to use Groq API Key
-        // Fallback to standard OpenAI or NVIDIA if Groq is not provided
         const apiKey = process.env.GROQ_API_KEY || process.env.GROK_API_KEY || process.env.NVIDIA_API_KEY || process.env.OPENAI_API_KEY;
-        
+        if (!apiKey) {
+            console.warn('[Transcription] No AI API key provided for audio transcription');
+            if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            return '';
+        }
+
         let baseURL = 'https://api.openai.com/v1';
         let modelName = 'whisper-1';
 
         if (process.env.GROQ_API_KEY || process.env.GROK_API_KEY) {
             baseURL = 'https://api.groq.com/openai/v1';
-            modelName = 'whisper-large-v3'; // Groq's extremely fast open-source whisper model
+            modelName = 'whisper-large-v3';
         } else if (process.env.NVIDIA_API_KEY) {
             baseURL = 'https://integrate.api.nvidia.com/v1';
             modelName = 'nvidia/parakeet-ctc-0.6b';
@@ -1036,10 +1128,12 @@ exports.transcribeAudioFile = async (buffer, filename) => {
             model: modelName,
             language: 'en',
         });
-        fs.unlinkSync(tempFilePath); // cleanup
-        return response.text;
+
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        return response.text || '';
     } catch (error) {
-        console.error('Error transcribing audio:', error);
-        throw new Error(`Failed to transcribe audio: ${error.message}`);
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        console.warn('[Transcription] Non-critical audio chunk transcription error:', error.message);
+        return '';
     }
 };

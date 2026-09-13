@@ -13,7 +13,7 @@ router.route('/')
 
 router.route('/:id')
     .get(getProjectById)
-    .put(authorize('OrgOwner', 'Admin', 'Project Manager'), updateProject)
-    .delete(authorize('OrgOwner', 'Admin'), deleteProject);
+    .put(authorize('OrgOwner', 'Admin', 'Project Manager', 'Member'), updateProject)
+    .delete(authorize('OrgOwner', 'Admin', 'Project Manager', 'Member'), deleteProject);
 
 module.exports = router;

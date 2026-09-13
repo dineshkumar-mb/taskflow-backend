@@ -25,6 +25,7 @@ const createProject = async (userId, userOrganizationId, data) => {
         name: `${data.name} Board`,
         type: 'kanban',
         project: project._id,
+        organization: userOrganizationId,
         columns: [
             { name: 'To Do', status: 'todo', position: 0 },
             { name: 'In Progress', status: 'in-progress', position: 1 },

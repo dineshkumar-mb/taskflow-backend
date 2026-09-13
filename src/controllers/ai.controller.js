@@ -3,6 +3,7 @@ const Issue = require('../models/Issue');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const projectService = require('../services/project.service');
+const issueService = require('../services/issue.service');
 const webhookService = require('../services/webhook.service');
 
 // ─────────────────────────────────────────────
@@ -157,7 +158,7 @@ const parseQuery = async (req, res) => {
     try {
         const { query } = req.body;
         if (!query) return res.status(400).json({ message: 'Query is required' });
-        
+
         const filters = await aiService.parseSearchQuery(query);
         res.status(200).json(filters);
     } catch (error) {
@@ -367,19 +368,70 @@ const copilotChat = async (req, res) => {
                 console.error('Failed to auto-create issue from AI:', dbError.message);
                 aiResponse.dbError = 'Issue detected but could not be saved: ' + dbError.message;
             }
-        } else if (aiResponse.action === 'create_project' && aiResponse.projectData && aiResponse.projectData.name) {
+        }
+
+        if (detectedIntent === 'create_project' && (!aiResponse.projectData || !aiResponse.projectData.name)) {
+            let extractedName = message.replace(/\b(create|add|make|new|build|a|an|the|project|workspace)\b/gi, '').trim();
+            // Clean up appended issue request strings if combined in prompt
+            extractedName = extractedName.split(/\b(and\s+in\s+that|and\s+add|with\s+issue|add\s+issue|add\s+a\s+issue|add\s+an\s+issue)\b/i)[0].trim();
+            extractedName = extractedName ? extractedName.charAt(0).toUpperCase() + extractedName.slice(1) : 'Demo Project';
+            const baseKey = (extractedName.replace(/[^A-Za-z]/g, '').substring(0, 3) || 'PRJ').toUpperCase();
+
+            aiResponse.action = 'create_project';
+            aiResponse.projectData = { name: extractedName, key: baseKey };
+        }
+
+        if (aiResponse.action === 'create_project' && aiResponse.projectData && aiResponse.projectData.name) {
             // ── Step 8: Auto-create project ───────────────────
             try {
-                const projectKey = aiResponse.projectData.key || aiResponse.projectData.name.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase();
+                let baseKey = (aiResponse.projectData.key || aiResponse.projectData.name.replace(/[^A-Za-z]/g, '').substring(0, 3) || 'PRJ').toUpperCase();
+                let uniqueKey = baseKey;
+                let counter = 1;
+
+                while (await Project.findOne({ organization: req.user.organizationId, key: uniqueKey })) {
+                    uniqueKey = `${baseKey}${counter++}`;
+                }
+
                 const newProject = await projectService.createProject(
                     req.user._id,
                     req.user.organizationId,
-                    { name: aiResponse.projectData.name, key: projectKey }
+                    { name: aiResponse.projectData.name, key: uniqueKey }
                 );
-                console.log('AI auto-created project:', newProject._id);
-                aiResponse.message = `✅ Project **"${newProject.name}"** created successfully!`;
+                console.log('AI auto-created project:', newProject._id, 'key:', uniqueKey);
+                aiResponse.message = `✅ Project **"${newProject.name}"** (Key: \`${uniqueKey}\`) created successfully!`;
                 aiResponse.createdProject = newProject;
                 aiResponse.updatedConversationState = {};
+
+                // Detect if prompt also asked to add an issue (e.g. "create a demo project and in that add a issue as ux not good")
+                const lowerMsg = message.toLowerCase();
+                if (lowerMsg.includes('issue') || lowerMsg.includes('task') || lowerMsg.includes('bug')) {
+                    let issueTitle = message.replace(/^(create|add|make)\s+(a\s+|an\s+)?(demo\s+)?project[^\w]*/i, '').trim();
+                    issueTitle = issueTitle.replace(/^and\s+(in\s+that\s+)?(add|create)?\s+(a\s+|an\s+)?(issue|task|bug)\s+(as|with)?\s*/i, '').trim();
+                    if (!issueTitle || issueTitle.length < 2) issueTitle = 'UX improvements required';
+
+                    try {
+                        const createdIssue = await issueService.createIssue(
+                            req.user._id,
+                            req.user.organizationId,
+                            {
+                                title: issueTitle.charAt(0).toUpperCase() + issueTitle.slice(1),
+                                description: `Auto-created task from project setup: ${issueTitle}`,
+                                project: newProject._id,
+                                priority: lowerMsg.includes('high') ? 'high' : 'medium',
+                                type: lowerMsg.includes('bug') ? 'bug' : 'task',
+                                status: 'todo'
+                            },
+                            req.io
+                        );
+                        aiResponse.message += `\n\n✅ Auto-created initial issue **"${createdIssue.title}"** (\`${createdIssue.key}\`) in **${newProject.name}**!`;
+                        aiResponse.createdIssue = createdIssue;
+                    } catch (issueErr) {
+                        console.error('Error auto-creating combined issue:', issueErr.message);
+                    }
+                }
+
+                const updatedProjects = await Project.find({ organization: req.user.organizationId }).select('_id name key');
+                aiResponse.availableProjects = updatedProjects.map(p => ({ id: p._id, name: p.name, key: p.key }));
             } catch (dbError) {
                 console.error('Failed to auto-create project from AI:', dbError.message);
                 aiResponse.dbError = 'Project detected but could not be saved: ' + dbError.message;
@@ -417,12 +469,11 @@ const transcribeAudio = async (req, res) => {
         if (!req.file) {
             return res.status(400).json({ message: 'No audio file provided' });
         }
-        // req.file contains buffer and originalname
         const text = await aiService.transcribeAudioFile(req.file.buffer, req.file.originalname);
-        res.status(200).json({ text });
+        res.status(200).json({ text: text || '' });
     } catch (error) {
-        console.error('Audio Transcription Error:', error);
-        res.status(500).json({ message: error.message });
+        console.warn('Audio Transcription Warning:', error.message);
+        res.status(200).json({ text: '', note: error.message });
     }
 };
 

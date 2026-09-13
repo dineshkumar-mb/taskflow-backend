@@ -35,7 +35,6 @@ const meetingSchema = new Schema({
   organization: {
     type: Schema.Types.ObjectId,
     ref: 'Organization',
-    required: true
   },
   projectId: {
     type: Schema.Types.ObjectId,
@@ -95,6 +94,7 @@ const meetingSchema = new Schema({
         title: String,
         description: String,
         assigneeId: { type: Schema.Types.ObjectId, ref: 'User' },
+        assigneeName: String,
         priority: { type: String, enum: ['Low', 'Medium', 'High'] },
         dueDate: Date,
         createdIssueId: { type: Schema.Types.ObjectId, ref: 'Issue' },
@@ -127,10 +127,14 @@ meetingSchema.index({ organizationId: 1, projectId: 1 });
 meetingSchema.index({ hostId: 1 });
 meetingSchema.index({ scheduledAt: 1 });
 
-// Middleware to populate searchText for future search index
-meetingSchema.pre('save', function(next) {
+// Middleware to populate searchText and sync organization fields
+meetingSchema.pre('save', function() {
+  if (this.organizationId && !this.organization) {
+    this.organization = this.organizationId;
+  } else if (this.organization && !this.organizationId) {
+    this.organizationId = this.organization;
+  }
   this.searchText = `${this.title} ${this.description || ''} ${this.agenda || ''}`.trim().toLowerCase();
-  next();
 });
 
 meetingSchema.plugin(softDeletePlugin);
