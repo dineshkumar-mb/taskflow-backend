@@ -5,6 +5,7 @@ const User = require('../models/User');
 const projectService = require('../services/project.service');
 const issueService = require('../services/issue.service');
 const webhookService = require('../services/webhook.service');
+const { assertProjectAccess, assertPermission, hasPermission, getActiveOrganizationId } = require('../security/tenantAccess');
 
 // ─────────────────────────────────────────────
 // Fix 4 — Intent Detection
@@ -82,6 +83,10 @@ const createIssueFromPrompt = async (req, res) => {
         const { prompt, projectId } = req.body;
         if (!prompt || !projectId) return res.status(400).json({ message: 'Prompt and ProjectId are required' });
 
+        await assertPermission(req.user, 'issue:create');
+        const project = await assertProjectAccess(req, projectId);
+        const orgId = project.organization || req.user.organizationId || req.organizationId;
+
         const extractedData = await aiService.extractIssueData(prompt);
 
         const newIssue = await Issue.create({
@@ -90,13 +95,16 @@ const createIssueFromPrompt = async (req, res) => {
             type: extractedData.type,
             priority: extractedData.priority,
             project: projectId,
+            organization: orgId,
+            organizationId: orgId,
             reporter: req.user._id,
             dueDate: extractedData.dueDate
         });
 
         res.status(201).json(newIssue);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
@@ -107,11 +115,14 @@ const analyzeRisk = async (req, res) => {
         const { projectId } = req.body;
         if (!projectId) return res.status(400).json({ message: 'ProjectId is required' });
 
-        // Gather project data
-        const project = await Project.findById(projectId).populate('owner', 'name');
-        if (!project) return res.status(404).json({ message: 'Project not found' });
+        // Verify project tenant access
+        const project = await assertProjectAccess(req, projectId, { requiredPermission: 'project:read' });
+        const orgId = project.organization || req.user.organizationId || req.organizationId;
 
-        const issues = await Issue.find({ project: projectId })
+        const issues = await Issue.find({
+            project: projectId,
+            organization: orgId
+        })
             .populate('assignee', 'name')
             .lean();
 
@@ -134,7 +145,8 @@ const analyzeRisk = async (req, res) => {
         const result = await aiService.analyzeRisk(projectData);
         res.status(200).json(result);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
@@ -143,12 +155,22 @@ const analyzeRisk = async (req, res) => {
 const getSprintPlan = async (req, res) => {
     try {
         const { projectId } = req.body;
-        const backlog = await Issue.find({ project: projectId, sprint: null });
+        if (!projectId) return res.status(400).json({ message: 'ProjectId is required' });
+
+        const project = await assertProjectAccess(req, projectId, { requiredPermission: 'project:read' });
+        const orgId = project.organization || req.user.organizationId || req.organizationId;
+
+        const backlog = await Issue.find({
+            project: projectId,
+            organization: orgId,
+            sprint: null
+        });
 
         const plan = await aiService.suggestSprintPlan(backlog);
         res.status(200).json(plan);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
@@ -247,7 +269,7 @@ const copilotChat = async (req, res) => {
         // ── Step 3: Fetch recent issues for AI context ────────────────────────
         let issues = [];
         if (validProjectId) {
-            issues = await Issue.find({ project: resolvedProjectId }).limit(10);
+            issues = await Issue.find({ project: resolvedProjectId, organization: req.user.organizationId }).limit(10);
         }
 
         // ── Step 4: Build merged conversationState ────────────────────────────
@@ -296,8 +318,20 @@ const copilotChat = async (req, res) => {
             mergedState.type;
 
         if (stateHasAllFields && validProjectId) {
+            const canCreate = await hasPermission(req.user, 'issue:create');
+            if (!canCreate) {
+                return res.status(200).json({
+                    action: 'permission_denied',
+                    message: '❌ You do not have permission to create issues in this organization.',
+                    updatedConversationState: mergedState,
+                });
+            }
+
             console.log('Shortcut: All fields in conversationState — skipping Gemini call.');
             try {
+                const targetProject = await assertProjectAccess(req, resolvedProjectId);
+                const orgId = targetProject.organization || req.user.organizationId;
+
                 const newIssue = await Issue.create({
                     title: mergedState.title,
                     description: mergedState.description,
@@ -305,7 +339,8 @@ const copilotChat = async (req, res) => {
                     type: mergedState.type.toLowerCase(),
                     project: resolvedProjectId,
                     reporter: req.user._id,
-                    organization: req.user.organizationId,
+                    organization: orgId,
+                    organizationId: orgId,
                     position: 0,
                     status: 'todo',
                 });
@@ -344,29 +379,39 @@ const copilotChat = async (req, res) => {
             aiResponse.issueData.type;
 
         if (issueReady && validProjectId) {
-            try {
-                const newIssue = await Issue.create({
-                    title: aiResponse.issueData.title,
-                    description: aiResponse.issueData.description,
-                    priority: aiResponse.issueData.priority.toLowerCase(),
-                    type: aiResponse.issueData.type.toLowerCase(),
-                    project: resolvedProjectId,
-                    reporter: req.user._id,
-                    organization: req.user.organizationId,
-                    position: 0,
-                    status: 'todo',
-                });
-                console.log('AI auto-created issue:', newIssue._id);
-                aiResponse.createdIssue = newIssue;
-                webhookService.emit('ai.issue_created', {
-                    issue: { id: newIssue._id, title: newIssue.title, type: newIssue.type, priority: newIssue.priority, project: newIssue.project },
-                    source: 'gemini',
-                    reporter: { id: req.user._id, email: req.user.email, name: req.user.name },
-                });
-                aiResponse.updatedConversationState = {};
-            } catch (dbError) {
-                console.error('Failed to auto-create issue from AI:', dbError.message);
-                aiResponse.dbError = 'Issue detected but could not be saved: ' + dbError.message;
+            const canCreate = await hasPermission(req.user, 'issue:create');
+            if (!canCreate) {
+                aiResponse.action = 'permission_denied';
+                aiResponse.message = '❌ You do not have permission to create issues in this organization.';
+            } else {
+                try {
+                    const targetProject = await assertProjectAccess(req, resolvedProjectId);
+                    const orgId = targetProject.organization || req.user.organizationId;
+
+                    const newIssue = await Issue.create({
+                        title: aiResponse.issueData.title,
+                        description: aiResponse.issueData.description,
+                        priority: aiResponse.issueData.priority.toLowerCase(),
+                        type: aiResponse.issueData.type.toLowerCase(),
+                        project: resolvedProjectId,
+                        reporter: req.user._id,
+                        organization: orgId,
+                        organizationId: orgId,
+                        position: 0,
+                        status: 'todo',
+                    });
+                    console.log('AI auto-created issue:', newIssue._id);
+                    aiResponse.createdIssue = newIssue;
+                    webhookService.emit('ai.issue_created', {
+                        issue: { id: newIssue._id, title: newIssue.title, type: newIssue.type, priority: newIssue.priority, project: newIssue.project },
+                        source: 'gemini',
+                        reporter: { id: req.user._id, email: req.user.email, name: req.user.name },
+                    });
+                    aiResponse.updatedConversationState = {};
+                } catch (dbError) {
+                    console.error('Failed to auto-create issue from AI:', dbError.message);
+                    aiResponse.dbError = 'Issue detected but could not be saved: ' + dbError.message;
+                }
             }
         }
 
@@ -383,59 +428,66 @@ const copilotChat = async (req, res) => {
 
         if (aiResponse.action === 'create_project' && aiResponse.projectData && aiResponse.projectData.name) {
             // ── Step 8: Auto-create project ───────────────────
-            try {
-                let baseKey = (aiResponse.projectData.key || aiResponse.projectData.name.replace(/[^A-Za-z]/g, '').substring(0, 3) || 'PRJ').toUpperCase();
-                let uniqueKey = baseKey;
-                let counter = 1;
+            const canCreateProject = await hasPermission(req.user, 'project:create');
+            if (!canCreateProject) {
+                aiResponse.action = 'permission_denied';
+                aiResponse.message = '❌ You do not have permission to create projects in this organization.';
+            } else {
+                try {
+                    let baseKey = (aiResponse.projectData.key || aiResponse.projectData.name.replace(/[^A-Za-z]/g, '').substring(0, 3) || 'PRJ').toUpperCase();
+                    let uniqueKey = baseKey;
+                    let counter = 1;
 
-                while (await Project.findOne({ organization: req.user.organizationId, key: uniqueKey })) {
-                    uniqueKey = `${baseKey}${counter++}`;
-                }
-
-                const newProject = await projectService.createProject(
-                    req.user._id,
-                    req.user.organizationId,
-                    { name: aiResponse.projectData.name, key: uniqueKey }
-                );
-                console.log('AI auto-created project:', newProject._id, 'key:', uniqueKey);
-                aiResponse.message = `✅ Project **"${newProject.name}"** (Key: \`${uniqueKey}\`) created successfully!`;
-                aiResponse.createdProject = newProject;
-                aiResponse.updatedConversationState = {};
-
-                // Detect if prompt also asked to add an issue (e.g. "create a demo project and in that add a issue as ux not good")
-                const lowerMsg = message.toLowerCase();
-                if (lowerMsg.includes('issue') || lowerMsg.includes('task') || lowerMsg.includes('bug')) {
-                    let issueTitle = message.replace(/^(create|add|make)\s+(a\s+|an\s+)?(demo\s+)?project[^\w]*/i, '').trim();
-                    issueTitle = issueTitle.replace(/^and\s+(in\s+that\s+)?(add|create)?\s+(a\s+|an\s+)?(issue|task|bug)\s+(as|with)?\s*/i, '').trim();
-                    if (!issueTitle || issueTitle.length < 2) issueTitle = 'UX improvements required';
-
-                    try {
-                        const createdIssue = await issueService.createIssue(
-                            req.user._id,
-                            req.user.organizationId,
-                            {
-                                title: issueTitle.charAt(0).toUpperCase() + issueTitle.slice(1),
-                                description: `Auto-created task from project setup: ${issueTitle}`,
-                                project: newProject._id,
-                                priority: lowerMsg.includes('high') ? 'high' : 'medium',
-                                type: lowerMsg.includes('bug') ? 'bug' : 'task',
-                                status: 'todo'
-                            },
-                            req.io
-                        );
-                        aiResponse.message += `\n\n✅ Auto-created initial issue **"${createdIssue.title}"** (\`${createdIssue.key}\`) in **${newProject.name}**!`;
-                        aiResponse.createdIssue = createdIssue;
-                    } catch (issueErr) {
-                        console.error('Error auto-creating combined issue:', issueErr.message);
+                    while (await Project.findOne({ organization: req.user.organizationId, key: uniqueKey })) {
+                        uniqueKey = `${baseKey}${counter++}`;
                     }
-                }
 
-                const updatedProjects = await Project.find({ organization: req.user.organizationId }).select('_id name key');
-                aiResponse.availableProjects = updatedProjects.map(p => ({ id: p._id, name: p.name, key: p.key }));
-            } catch (dbError) {
-                console.error('Failed to auto-create project from AI:', dbError.message);
-                aiResponse.dbError = 'Project detected but could not be saved: ' + dbError.message;
-                aiResponse.message = `❌ Failed to create project: ${dbError.message}`;
+                    const newProject = await projectService.createProject(
+                        req.user._id,
+                        req.user.organizationId,
+                        { name: aiResponse.projectData.name, key: uniqueKey }
+                    );
+                    console.log('AI auto-created project:', newProject._id, 'key:', uniqueKey);
+                    aiResponse.message = `✅ Project **"${newProject.name}"** (Key: \`${uniqueKey}\`) created successfully!`;
+                    aiResponse.createdProject = newProject;
+                    aiResponse.updatedConversationState = {};
+
+                    // Detect if prompt also asked to add an issue (e.g. "create a demo project and in that add a issue as ux not good")
+                    const lowerMsg = message.toLowerCase();
+                    const canCreateIssue = await hasPermission(req.user, 'issue:create');
+                    if (canCreateIssue && (lowerMsg.includes('issue') || lowerMsg.includes('task') || lowerMsg.includes('bug'))) {
+                        let issueTitle = message.replace(/^(create|add|make)\s+(a\s+|an\s+)?(demo\s+)?project[^\w]*/i, '').trim();
+                        issueTitle = issueTitle.replace(/^and\s+(in\s+that\s+)?(add|create)?\s+(a\s+|an\s+)?(issue|task|bug)\s+(as|with)?\s*/i, '').trim();
+                        if (!issueTitle || issueTitle.length < 2) issueTitle = 'UX improvements required';
+
+                        try {
+                            const createdIssue = await issueService.createIssue(
+                                req.user._id,
+                                req.user.organizationId,
+                                {
+                                    title: issueTitle.charAt(0).toUpperCase() + issueTitle.slice(1),
+                                    description: `Auto-created task from project setup: ${issueTitle}`,
+                                    project: newProject._id,
+                                    priority: lowerMsg.includes('high') ? 'high' : 'medium',
+                                    type: lowerMsg.includes('bug') ? 'bug' : 'task',
+                                    status: 'todo'
+                                },
+                                req.io
+                            );
+                            aiResponse.message += `\n\n✅ Auto-created initial issue **"${createdIssue.title}"** (\`${createdIssue.key}\`) in **${newProject.name}**!`;
+                            aiResponse.createdIssue = createdIssue;
+                        } catch (issueErr) {
+                            console.error('Error auto-creating combined issue:', issueErr.message);
+                        }
+                    }
+
+                    const updatedProjects = await Project.find({ organization: req.user.organizationId }).select('_id name key');
+                    aiResponse.availableProjects = updatedProjects.map(p => ({ id: p._id, name: p.name, key: p.key }));
+                } catch (dbError) {
+                    console.error('Failed to auto-create project from AI:', dbError.message);
+                    aiResponse.dbError = 'Project detected but could not be saved: ' + dbError.message;
+                    aiResponse.message = `❌ Failed to create project: ${dbError.message}`;
+                }
             }
         } else if (issueReady && !validProjectId) {
             // ── Smart missing-project UX ─────────────────────────────────────

@@ -13,7 +13,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
  * Send a prompt to the local Ollama server.
  * Returns { text, parsed } or throws on connection error.
  */
-async function callOllama(prompt, { json = true, timeoutMs = 60000 } = {}) {
+async function callOllama(prompt, { json = true, timeoutMs = (process.env.NODE_ENV === 'production' ? 2000 : 5000) } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 

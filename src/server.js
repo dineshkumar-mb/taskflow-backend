@@ -53,13 +53,16 @@ if (isStripeConfigured) {
     app.post('/api/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 }
 
+const sanitizeInput = require('./middleware/sanitize.middleware');
+
 app.use(express.json());
-// app.use(mongoSanitize()); // Disabled due to Express 5 compatibility issue
+app.use(sanitizeInput);
 app.use(cookieParser());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use(morgan('dev'));
 
 // Inject Socket.io
+global.io = io;
 app.use((req, res, next) => {
     req.io = io;
     next();
@@ -67,6 +70,24 @@ app.use((req, res, next) => {
 
 // Database Connection
 connectDB();
+
+// Initialize distributed infrastructure (Redis, BullMQ queues, workers)
+const { initRedis } = require('./config/redis');
+const { initQueues } = require('./queues/queueManager');
+const { initWorkers, shutdownWorkers } = require('./workers/workerManager');
+
+(async () => {
+    try {
+        await initRedis();
+        initQueues();
+        initWorkers();
+    } catch (infraErr) {
+        console.warn('[Infrastructure Init Notice]', infraErr.message);
+    }
+})();
+
+// Health Probes for Container Orchestrators (K8s/Docker)
+app.use('/health', require('./routes/health.routes'));
 
 // Routes
 const v1Router = require('./routes/v1.index');
@@ -94,6 +115,26 @@ if (process.env.NODE_ENV !== 'production') {
         console.log(`Server running on port ${PORT}`);
     });
 }
+
+// Graceful shutdown handling (Phase 57)
+const gracefulShutdown = async (signal) => {
+    console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+    try {
+        await shutdownWorkers();
+        const mongoose = require('mongoose');
+        await mongoose.connection.close();
+        httpServer.close(() => {
+            console.log('[Server] HTTP server closed cleanly.');
+            process.exit(0);
+        });
+    } catch (err) {
+        console.error('[Server Error] Shutdown error:', err);
+        process.exit(1);
+    }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Export the Express app for Vercel
 module.exports = app;

@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { getMe, getOrgUsers, inviteMember, removeMember, searchUsers, switchWorkspace } = require('../controllers/user.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 
 router.use(protect);
+router.use(requireTenantContext);
 
 router.get('/me', getMe);
 router.get('/', getOrgUsers);

@@ -11,11 +11,13 @@ const {
     analyzeRisk
 } = require('../controllers/ai.controller');
 const { protect } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 const checkAiUsageLimit = require('../middleware/aiUsage.middleware');
 
 
 
 router.use(protect);
+router.use(requireTenantContext);
 router.use(checkAiUsageLimit);
 
 router.post('/summary', generateSummary);

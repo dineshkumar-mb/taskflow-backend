@@ -124,6 +124,7 @@ const meetingSchema = new Schema({
 // Indexes
 meetingSchema.index({ organization: 1 });
 meetingSchema.index({ organizationId: 1, projectId: 1 });
+meetingSchema.index({ organizationId: 1, scheduledAt: -1 });
 meetingSchema.index({ hostId: 1 });
 meetingSchema.index({ scheduledAt: 1 });
 

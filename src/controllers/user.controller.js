@@ -95,10 +95,24 @@ const searchUsers = async (req, res) => {
             return res.json([]);
         }
 
+        const orgId = req.organizationId || (req.user && (req.user.organizationId || req.user.organization));
+        if (!orgId) {
+            return res.json([]);
+        }
+
+        const orgMembers = await OrganizationMember.find({
+            organization: orgId,
+            status: 'active'
+        }).select('user').lean();
+
+        const userIds = orgMembers.map(m => m.user);
+        const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
         const users = await User.find({
+            _id: { $in: userIds },
             $or: [
-                { name: { $regex: query, $options: 'i' } },
-                { email: { $regex: query, $options: 'i' } }
+                { name: { $regex: escapedQuery, $options: 'i' } },
+                { email: { $regex: escapedQuery, $options: 'i' } }
             ]
         })
             .select('name email avatar')

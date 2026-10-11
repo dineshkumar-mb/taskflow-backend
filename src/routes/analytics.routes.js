@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 const { getOrgStats, getProjectAnalytics } = require('../controllers/analytics.controller');
 
-router.get('/org', protect, getOrgStats);
-router.get('/project/:projectId', protect, getProjectAnalytics);
+router.use(protect);
+router.use(requireTenantContext);
+
+router.get('/org', getOrgStats);
+router.get('/project/:projectId', getProjectAnalytics);
 
 module.exports = router;

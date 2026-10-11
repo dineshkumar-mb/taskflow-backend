@@ -6,8 +6,11 @@ const sendInvite = async (req, res) => {
         const { email, role } = req.body;
         if (!email) return res.status(400).json({ message: 'Email is required' });
 
+        const orgId = req.organizationId || req.user.organizationId || req.user.organization;
+        if (!orgId) return res.status(400).json({ message: 'Active organization context required' });
+
         const invite = await inviteService.sendInvite(
-            req.user.organizationId,
+            orgId,
             req.user._id,
             email,
             role || 'Member'
@@ -16,7 +19,7 @@ const sendInvite = async (req, res) => {
         res.status(201).json({ message: 'Invitation sent successfully', invite });
         // n8n: fire-and-forget
         webhookService.emit('invite.sent', {
-            invite: { id: invite._id, email, role: role || 'Member', organizationId: req.user.organizationId },
+            invite: { id: invite._id, email, role: role || 'Member', organizationId: orgId },
             invitedBy: { id: req.user._id, email: req.user.email, name: req.user.name },
         });
     } catch (error) {

@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { getAuditLogs } = require('../controllers/audit.controller');
-const { protect, requirePermission } = require('../middleware/auth.middleware');
+const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 
 router.use(protect);
-// Require admin level permissions or wildcard
-router.use(requirePermission('*'));
+router.use(requireTenantContext);
+router.use(authorize('SuperAdmin', 'OrgOwner', 'Admin'));
 
 router.route('/')
     .get(getAuditLogs);

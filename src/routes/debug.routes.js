@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { lastEmit } = require('../services/webhook.service');
+const { protect, authorize } = require('../middleware/auth.middleware');
 
 const N8N_ISSUE_WEBHOOK = process.env.N8N_ISSUE_WEBHOOK;
 const N8N_SPRINT_WEBHOOK = process.env.N8N_SPRINT_WEBHOOK;
@@ -15,10 +16,10 @@ const N8N_BILLING_WEBHOOK = process.env.N8N_BILLING_WEBHOOK;
 
 /**
  * GET /api/debug/n8n
- * Returns the current state of the n8n integration.
- * Public endpoint (no auth required for monitoring tools).
+ * Diagnostic endpoint for n8n integration status.
+ * Restricted to SuperAdmin and OrgOwner/Admin.
  */
-router.get('/n8n', (req, res) => {
+router.get('/n8n', protect, authorize('SuperAdmin', 'OrgOwner', 'Admin'), (req, res) => {
     const webhookConfigured = !!(N8N_ISSUE_WEBHOOK && N8N_SPRINT_WEBHOOK);
 
     res.json({
@@ -29,14 +30,13 @@ router.get('/n8n', (req, res) => {
             event: lastEmit.event,
             timestamp: lastEmit.timestamp,
             status: lastEmit.status,
-            error: lastEmit.error,
+            error: lastEmit.error ? (process.env.NODE_ENV === 'production' ? 'Execution failure' : lastEmit.error) : null,
         },
-        webhookUrls: {
-            issues: N8N_ISSUE_WEBHOOK || 'NOT CONFIGURED',
-            sprints: N8N_SPRINT_WEBHOOK || 'NOT CONFIGURED',
-            billing: N8N_BILLING_WEBHOOK || 'NOT CONFIGURED',
+        webhooksConfigured: {
+            issues: !!N8N_ISSUE_WEBHOOK,
+            sprints: !!N8N_SPRINT_WEBHOOK,
+            billing: !!N8N_BILLING_WEBHOOK,
         },
-        environment: process.env.NODE_ENV || 'development',
         timestamp: new Date().toISOString(),
     });
 });

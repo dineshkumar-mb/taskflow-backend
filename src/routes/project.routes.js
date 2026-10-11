@@ -5,7 +5,10 @@ const { protect, authorize, checkPlan } = require('../middleware/auth.middleware
 const validate = require('../middleware/validate.middleware');
 const { createProjectSchema } = require('../validations/project.validation');
 
+const { requireTenantContext } = require('../security/tenantAccess');
+
 router.use(protect);
+router.use(requireTenantContext);
 
 router.route('/')
     .get(getProjects)
@@ -13,7 +16,7 @@ router.route('/')
 
 router.route('/:id')
     .get(getProjectById)
-    .put(authorize('OrgOwner', 'Admin', 'Project Manager', 'Member'), updateProject)
-    .delete(authorize('OrgOwner', 'Admin', 'Project Manager', 'Member'), deleteProject);
+    .put(authorize('OrgOwner', 'Admin', 'Project Manager'), updateProject)
+    .delete(authorize('OrgOwner', 'Admin'), deleteProject);
 
 module.exports = router;

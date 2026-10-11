@@ -1,15 +1,17 @@
 const AuditLog = require('../models/AuditLog');
+const { getActiveOrganizationId } = require('../security/tenantAccess');
 
 // @desc    Get organization audit logs
 // @route   GET /api/audit
 // @access  Private
 const getAuditLogs = async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
         const skip = (page - 1) * limit;
 
-        const query = { organization: req.user.organizationId };
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const query = { organization: orgId };
 
         if (req.query.user) {
             query.user = req.query.user;

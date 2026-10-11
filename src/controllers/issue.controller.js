@@ -4,6 +4,7 @@ const User = require('../models/User');
 const webhookService = require('../services/webhook.service');
 const notificationService = require('../services/notification.service');
 const auditService = require('../services/audit.service');
+const { assertIssueAccess, assertProjectAccess, getActiveOrganizationId } = require('../security/tenantAccess');
 
 const createIssue = async (req, res) => {
     try {
@@ -165,15 +166,19 @@ const uploadAttachments = async (req, res) => {
             return res.status(400).json({ message: 'No files uploaded' });
         }
 
+        const issueRecord = await assertIssueAccess(req, req.params.id);
+        const orgId = issueRecord.organization || req.organizationId;
+
         // Generate relative URLs or direct file paths for the frontend
         const fileUrls = req.files.map(file => `/uploads/${file.filename}`);
 
         // Use issueService to append these paths
-        const issue = await issueService.addAttachments(req.params.id, req.user.organizationId, fileUrls, req.user._id);
+        const issue = await issueService.addAttachments(req.params.id, orgId, fileUrls, req.user._id);
 
         res.status(200).json({ message: 'Files uploaded successfully', issue });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
@@ -181,28 +186,40 @@ const addLink = async (req, res) => {
     try {
         const { type, targetIssueId } = req.body;
         if (!type || !targetIssueId) return res.status(400).json({ message: 'type and targetIssueId are required' });
-        const issue = await issueService.addLink(req.params.id, req.user.organizationId, type, targetIssueId, req.user._id);
+
+        const sourceIssue = await assertIssueAccess(req, req.params.id);
+        await assertIssueAccess(req, targetIssueId);
+        const orgId = sourceIssue.organization || req.organizationId;
+
+        const issue = await issueService.addLink(req.params.id, orgId, type, targetIssueId, req.user._id);
         res.json(issue);
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 400);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
 const removeLink = async (req, res) => {
     try {
-        const issue = await issueService.removeLink(req.params.id, req.user.organizationId, req.params.linkId, req.user._id);
+        const issueRecord = await assertIssueAccess(req, req.params.id);
+        const orgId = issueRecord.organization || req.organizationId;
+
+        const issue = await issueService.removeLink(req.params.id, orgId, req.params.linkId, req.user._id);
         res.json(issue);
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 400);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
 const reorderIssues = async (req, res) => {
     try {
-        const issue = await issueService.reorderIssues(req.user._id, req.user.organizationId, req.body, req.io);
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const issue = await issueService.reorderIssues(req.user._id, orgId, req.body, req.io);
         res.json(issue);
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 400);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 

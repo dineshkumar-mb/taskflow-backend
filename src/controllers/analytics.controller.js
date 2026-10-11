@@ -1,20 +1,26 @@
 const analyticsService = require('../services/analytics.service');
+const { assertProjectAccess, getActiveOrganizationId } = require('../security/tenantAccess');
 
 const getOrgStats = async (req, res) => {
     try {
-        const stats = await analyticsService.getOrgStats(req.user.organizationId);
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const stats = await analyticsService.getOrgStats(orgId);
         res.json(stats);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 
 const getProjectAnalytics = async (req, res) => {
     try {
-        const stats = await analyticsService.getProjectAnalytics(req.params.projectId, req.user.organizationId);
+        const project = await assertProjectAccess(req, req.params.projectId, { requiredPermission: 'project:read' });
+        const orgId = project.organization || req.organizationId;
+        const stats = await analyticsService.getProjectAnalytics(req.params.projectId, orgId);
         res.json(stats);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error.statusCode || (error.name === 'TenantAccessError' ? 403 : 500);
+        res.status(statusCode).json({ message: error.message });
     }
 };
 

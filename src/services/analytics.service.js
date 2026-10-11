@@ -35,9 +35,10 @@ const getOrgStats = async (organizationId) => {
         { $sort: { '_id.project': 1, '_id.status': 1 } }
     ]);
 
-    // 2. Total projects, issues, and members
+    // 2. Total projects, issues, members, and active sprints
     const totalProjects = await Project.countDocuments({ organization: organizationId });
     const totalIssues = await Issue.countDocuments({ organization: organizationId });
+    const activeSprints = await Sprint.countDocuments({ organization: organizationId, status: 'active' });
     const org = await Organization.findById(organizationId).select('members');
     const totalMembers = org ? org.members.length : 0;
 
@@ -61,6 +62,7 @@ const getOrgStats = async (organizationId) => {
         totalProjects,
         totalIssues,
         totalMembers,
+        activeSprints,
     };
 };
 

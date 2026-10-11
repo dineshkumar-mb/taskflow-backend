@@ -1,11 +1,13 @@
 const Role = require('../models/Role');
+const { getActiveOrganizationId } = require('../security/tenantAccess');
 
 // @desc    Get all roles for organization
 // @route   GET /api/roles
 // @access  Private
 const getRoles = async (req, res) => {
     try {
-        const roles = await Role.find({ organization: req.user.organizationId });
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const roles = await Role.find({ organization: orgId });
         res.status(200).json(roles);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -18,8 +20,9 @@ const getRoles = async (req, res) => {
 const createRole = async (req, res) => {
     try {
         const { name, description, permissions } = req.body;
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
         
-        const roleExists = await Role.findOne({ name, organization: req.user.organizationId });
+        const roleExists = await Role.findOne({ name, organization: orgId });
         if (roleExists) {
             return res.status(400).json({ message: 'Role with this name already exists' });
         }
@@ -28,7 +31,7 @@ const createRole = async (req, res) => {
             name,
             description,
             permissions: permissions || [],
-            organization: req.user.organizationId,
+            organization: orgId,
             isSystem: false,
         });
 
@@ -43,9 +46,10 @@ const createRole = async (req, res) => {
 // @access  Private
 const updateRole = async (req, res) => {
     try {
-        const role = await Role.findById(req.params.id);
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const role = await Role.findOne({ _id: req.params.id, organization: orgId });
 
-        if (!role || role.organization.toString() !== req.user.organizationId.toString()) {
+        if (!role) {
             return res.status(404).json({ message: 'Role not found' });
         }
 
@@ -70,9 +74,10 @@ const updateRole = async (req, res) => {
 // @access  Private
 const deleteRole = async (req, res) => {
     try {
-        const role = await Role.findById(req.params.id);
+        const orgId = req.organizationId || await getActiveOrganizationId(req);
+        const role = await Role.findOne({ _id: req.params.id, organization: orgId });
 
-        if (!role || role.organization.toString() !== req.user.organizationId.toString()) {
+        if (!role) {
             return res.status(404).json({ message: 'Role not found' });
         }
 
@@ -80,14 +85,14 @@ const deleteRole = async (req, res) => {
             return res.status(400).json({ message: 'System roles cannot be deleted' });
         }
 
-        // Optional: Check if users are still assigned to this role before deleting
+        // Check if users are still assigned to this role before deleting
         const User = require('../models/User');
-        const usersWithRole = await User.countDocuments({ role: role._id });
+        const usersWithRole = await User.countDocuments({ role: role._id, organization: orgId });
         if (usersWithRole > 0) {
             return res.status(400).json({ message: `Cannot delete role. It is assigned to ${usersWithRole} users.` });
         }
 
-        await Role.findByIdAndDelete(req.params.id);
+        await Role.findOneAndDelete({ _id: req.params.id, organization: orgId });
 
         res.status(200).json({ message: 'Role removed' });
     } catch (error) {

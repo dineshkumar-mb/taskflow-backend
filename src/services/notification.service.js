@@ -2,25 +2,39 @@ const Notification = require('../models/Notification');
 const Issue = require('../models/Issue');
 const sendEmail = require('../utils/sendEmail');
 const { sendSlackAssignment } = require('../utils/sendSlack');
-const getUserNotifications = async (userId) => {
-    return await Notification.find({ user: userId })
+const { sendWhatsAppAssignment } = require('../utils/sendWhatsApp');
+
+const getUserNotifications = async (userId, organizationId = null) => {
+    const query = { user: userId };
+    if (organizationId) {
+        query.organization = organizationId;
+    }
+    return await Notification.find(query)
         .populate('initiator', 'name avatar')
         .populate('issue', 'key title')
         .sort({ createdAt: -1 })
         .limit(50);
 };
 
-const markAsRead = async (notificationId, userId) => {
+const markAsRead = async (notificationId, userId, organizationId = null) => {
+    const query = { _id: notificationId, user: userId };
+    if (organizationId) {
+        query.organization = organizationId;
+    }
     return await Notification.findOneAndUpdate(
-        { _id: notificationId, user: userId },
+        query,
         { read: true },
         { new: true }
     );
 };
 
-const markAllAsRead = async (userId) => {
+const markAllAsRead = async (userId, organizationId = null) => {
+    const query = { user: userId, read: false };
+    if (organizationId) {
+        query.organization = organizationId;
+    }
     await Notification.updateMany(
-        { user: userId, read: false },
+        query,
         { read: true }
     );
 };
@@ -29,6 +43,16 @@ const markAllAsRead = async (userId) => {
 const createNotification = async (data, io) => {
     // Avoid notifying the initiator themselves
     if (String(data.user) === String(data.initiator)) return null;
+
+    // Ensure organization field is set
+    if (!data.organization && data.issue) {
+        try {
+            const linkedIssue = await Issue.findById(data.issue).select('organization');
+            if (linkedIssue && linkedIssue.organization) {
+                data.organization = linkedIssue.organization;
+            }
+        } catch (_) {}
+    }
 
     const notification = await Notification.create(data);
     const populated = await Notification.findById(notification._id)

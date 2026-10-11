@@ -72,13 +72,14 @@ const updateProject = async (projectId, organizationId, data) => {
 };
 
 const deleteProject = async (projectId, organizationId) => {
-    const project = await Project.findById(projectId);
-    if (!project) throw new Error('Project not found');
+    // Strictly verify project belongs to the requesting organization
+    const project = await Project.findOne({ _id: projectId, organization: organizationId });
+    if (!project) throw new Error('Project not found or not in your organization');
 
-    // Delete all related data
-    await Issue.deleteMany({ project: projectId });
-    await Sprint.deleteMany({ project: projectId });
-    await Board.deleteMany({ project: projectId });
+    // Delete all related data scoped to this organization
+    await Issue.deleteMany({ project: projectId, organization: organizationId });
+    await Sprint.deleteMany({ project: projectId, organization: organizationId });
+    await Board.deleteMany({ project: projectId, organization: organizationId });
 
     // Remove from organization
     await Organization.findByIdAndUpdate(organizationId, {

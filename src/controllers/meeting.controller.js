@@ -6,12 +6,24 @@ const User = require('../models/User');
 const issueService = require('../services/issue.service');
 const { sendEmail } = require('../services/email.service');
 const { generateMOMFromTranscript } = require('../services/ai.service');
+const {
+  assertMeetingAccess,
+  assertProjectAccess,
+  assertTranscriptAccess,
+  getActiveOrganizationId
+} = require('../security/tenantAccess');
+const DistributedLock = require('../security/distributedLock');
+const { enqueueJob, QUEUE_NAMES } = require('../queues/queueManager');
 
 // Create (schedule) meeting
 exports.createMeeting = async (req, res) => {
   try {
     const { title, description, agenda, scheduledAt, projectId, sprintId, participantIds } = req.body;
     const hostId = req.user._id;
+    const orgId = await getActiveOrganizationId(req);
+
+    // Validate project belongs to organization
+    await assertProjectAccess(req, projectId);
 
     // Validate scheduled time is in future
     if (new Date(scheduledAt) < new Date()) {
@@ -29,8 +41,8 @@ exports.createMeeting = async (req, res) => {
       description,
       agenda,
       scheduledAt,
-      organizationId: req.user.organizationId,
-      organization: req.user.organizationId,
+      organizationId: orgId,
+      organization: orgId,
       projectId,
       sprintId,
       hostId,
@@ -69,9 +81,12 @@ exports.createMeeting = async (req, res) => {
 exports.getGlobalMeetings = async (req, res) => {
   try {
     const userId = req.user._id;
+    const orgId = await getActiveOrganizationId(req);
     const meetings = await Meeting.find({
-      organizationId: req.user.organizationId,
-      $or: [{ hostId: userId }, { participantIds: userId }]
+      $and: [
+        { $or: [{ organizationId: orgId }, { organization: orgId }] },
+        { $or: [{ hostId: userId }, { participantIds: userId }] }
+      ]
     })
       .populate('hostId', 'name email')
       .populate('projectId', 'name key')
@@ -80,7 +95,7 @@ exports.getGlobalMeetings = async (req, res) => {
 
     res.json({ success: true, meetings });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 
@@ -88,14 +103,20 @@ exports.getGlobalMeetings = async (req, res) => {
 exports.getMeetingsByProject = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const meetings = await Meeting.find({ projectId })
+    const orgId = await getActiveOrganizationId(req);
+    await assertProjectAccess(req, projectId);
+
+    const meetings = await Meeting.find({
+      projectId,
+      $or: [{ organizationId: orgId }, { organization: orgId }]
+    })
       .populate('hostId', 'name email')
       .populate('participantIds', 'name email')
       .sort({ scheduledAt: -1 });
 
     res.json({ success: true, meetings });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 
@@ -103,18 +124,11 @@ exports.getMeetingsByProject = async (req, res) => {
 exports.getMeetingById = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await Meeting.findById(meetingId)
-      .populate('hostId', 'name email')
-      .populate('participantIds', 'name email')
-      .populate('mom.actionItems.assigneeId', 'name');
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
+    const meeting = await assertMeetingAccess(req, meetingId, { populate: true });
 
     res.json({ success: true, meeting });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 
@@ -124,10 +138,7 @@ exports.updateMeeting = async (req, res) => {
     const { meetingId } = req.params;
     const { title, agenda, participantIds, scheduledAt } = req.body;
 
-    const meeting = await Meeting.findById(meetingId);
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
+    const meeting = await assertMeetingAccess(req, meetingId);
 
     if (meeting.status !== 'scheduled') {
       return res.status(400).json({ error: 'Can only update scheduled meetings' });
@@ -143,7 +154,7 @@ exports.updateMeeting = async (req, res) => {
 
     res.json({ success: true, meeting });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 
@@ -151,11 +162,7 @@ exports.updateMeeting = async (req, res) => {
 exports.startMeeting = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await Meeting.findById(meetingId);
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
+    const meeting = await assertMeetingAccess(req, meetingId);
 
     if (meeting.hostId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Only host can start meeting' });
@@ -164,9 +171,11 @@ exports.startMeeting = async (req, res) => {
     meeting.status = 'live';
     await meeting.save();
 
-    // Create empty transcript record
+    // Create empty transcript record with tenant linkage
     await Transcript.create({
       meetingId: meeting._id,
+      organizationId: meeting.organizationId,
+      organization: meeting.organizationId,
       segments: []
     });
 
@@ -181,7 +190,7 @@ exports.startMeeting = async (req, res) => {
 
     res.json({ success: true, message: 'Meeting started' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 
@@ -191,10 +200,7 @@ exports.endMeeting = async (req, res) => {
     const { meetingId } = req.params;
     const { transcriptSegments, attendeeIds } = req.body;
 
-    const meeting = await Meeting.findById(meetingId);
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
+    const meeting = await assertMeetingAccess(req, meetingId);
 
     // Filter valid mongo IDs for attendedIds
     const validAttendeeIds = (attendeeIds || [])
@@ -211,10 +217,15 @@ exports.endMeeting = async (req, res) => {
     const duration = Math.max(0, Math.floor((now - new Date(meeting.scheduledAt)) / 60000)); // minutes
     meeting.duration = duration;
 
-    // Save transcript segments
+    // Save transcript segments with tenant scoping
     let transcript = await Transcript.findOne({ meetingId });
     if (!transcript) {
-      transcript = new Transcript({ meetingId, segments: [] });
+      transcript = new Transcript({
+        meetingId,
+        organizationId: meeting.organizationId,
+        organization: meeting.organizationId,
+        segments: []
+      });
     }
     
     if (transcriptSegments && Array.isArray(transcriptSegments) && transcriptSegments.length > 0) {
@@ -257,13 +268,7 @@ exports.endMeeting = async (req, res) => {
 exports.generateMOM = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await Meeting.findById(meetingId)
-      .populate('participantIds', 'name email')
-      .populate('hostId', 'name email');
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
+    const meeting = await assertMeetingAccess(req, meetingId, { populate: true });
 
     const rawText = meeting.transcriptRaw && meeting.transcriptRaw.trim() 
       ? meeting.transcriptRaw 
@@ -348,9 +353,7 @@ exports.confirmAndSendMOM = async (req, res) => {
     const { meetingId } = req.params;
     const { updatedMOM } = req.body;
 
-    const meeting = await Meeting.findById(meetingId)
-      .populate('hostId', 'name email')
-      .populate('participantIds', 'name email');
+    const meeting = await assertMeetingAccess(req, meetingId, { populate: true });
 
     if (!meeting || !meeting.mom) {
       return res.status(400).json({ error: 'Meeting or MOM not found' });
@@ -358,94 +361,108 @@ exports.confirmAndSendMOM = async (req, res) => {
 
     const hostId = meeting.hostId?._id || meeting.hostId;
 
-    // Update MOM if edited
-    if (updatedMOM) {
-      meeting.mom.summary = updatedMOM.summary || meeting.mom.summary;
-      meeting.mom.decisions = updatedMOM.decisions || meeting.mom.decisions;
-      if (updatedMOM.actionItems) {
-        meeting.mom.actionItems = updatedMOM.actionItems.map(item => {
-          const rawAssignee = item.assigneeId?._id || item.assigneeId || hostId;
-          return {
-            title: item.title,
-            description: item.description,
-            assigneeId: rawAssignee,
-            assigneeName: item.assigneeName || '',
-            priority: item.priority || 'Medium',
-            dueDate: item.dueDate ? new Date(item.dueDate) : null,
-            completed: false
-          };
-        });
-      }
-    }
-
-    meeting.mom.confirmedAt = new Date();
-    await meeting.save();
-
-    // 1. Send MOM email to all participants and host (safely with Promise.allSettled)
-    const allAttendeesMap = new Map();
-    if (Array.isArray(meeting.participantIds)) {
-      meeting.participantIds.forEach(p => { if (p && p.email) allAttendeesMap.set(p._id.toString(), p); });
-    }
-    if (meeting.hostId && meeting.hostId.email) {
-      allAttendeesMap.set(meeting.hostId._id.toString(), meeting.hostId);
-    }
-    const uniqueAttendees = Array.from(allAttendeesMap.values());
-
-    await Promise.allSettled(uniqueAttendees.map(participant =>
-      sendMOMEmail(meeting, participant).catch(err => {
-        console.warn(`Failed to send MOM email to ${participant.email}:`, err.message);
-      })
-    ));
-
-    // 2. Create Issues for each action item using issueService
-    const orgId = meeting.organizationId;
-
-    for (const actionItem of meeting.mom.actionItems) {
-      if (!actionItem.createdIssueId) {
-        try {
-          const targetAssignee = actionItem.assigneeId?._id || actionItem.assigneeId || hostId;
-          const createdIssue = await issueService.createIssue(
-            hostId,
-            orgId,
-            {
-              title: actionItem.title || 'Meeting Action Item',
-              description: actionItem.description || `Action item from meeting: ${meeting.title}`,
-              project: meeting.projectId,
-              sprint: meeting.sprintId || undefined,
-              assignee: targetAssignee,
-              priority: actionItem.priority ? actionItem.priority.toLowerCase() : 'medium',
-              dueDate: actionItem.dueDate || undefined,
-              status: 'todo',
-              type: 'task'
-            },
-            req.io
-          );
-          actionItem.createdIssueId = createdIssue._id;
-        } catch (err) {
-          console.error('Error creating issue for action item:', err);
+    // Use Distributed Lock to prevent duplicate issue creation and race conditions (Phase 17 & Phase 8)
+    await DistributedLock.withLock(`mom_confirm:${meeting._id}`, async () => {
+      // Update MOM if edited
+      if (updatedMOM) {
+        meeting.mom.summary = updatedMOM.summary || meeting.mom.summary;
+        meeting.mom.decisions = updatedMOM.decisions || meeting.mom.decisions;
+        if (updatedMOM.actionItems) {
+          meeting.mom.actionItems = updatedMOM.actionItems.map(item => {
+            const rawAssignee = item.assigneeId?._id || item.assigneeId || hostId;
+            return {
+              title: item.title,
+              description: item.description,
+              assigneeId: rawAssignee,
+              assigneeName: item.assigneeName || '',
+              priority: item.priority || 'Medium',
+              dueDate: item.dueDate ? new Date(item.dueDate) : null,
+              completed: false,
+              createdIssueId: item.createdIssueId || null
+            };
+          });
         }
       }
-    }
 
-    await meeting.save();
+      meeting.mom.confirmedAt = new Date();
+      await meeting.save();
 
-    // 3. Log activity
-    await Activity.create({
-      organizationId: meeting.organizationId,
-      projectId: meeting.projectId,
-      user: req.user._id,
-      meetingId: meeting._id,
-      type: 'mom_sent',
-      metadata: {
-        meetingTitle: meeting.title,
-        actionItemsCount: meeting.mom.actionItems.length,
-        attendeeCount: uniqueAttendees.length
+      // 1. Queue MOM emails asynchronously to background workers (Phase 29)
+      const allAttendeesMap = new Map();
+      if (Array.isArray(meeting.participantIds)) {
+        meeting.participantIds.forEach(p => { if (p && p.email) allAttendeesMap.set(p._id.toString(), p); });
       }
+      if (meeting.hostId && meeting.hostId.email) {
+        allAttendeesMap.set(meeting.hostId._id.toString(), meeting.hostId);
+      }
+      const uniqueAttendees = Array.from(allAttendeesMap.values());
+
+      for (const participant of uniqueAttendees) {
+        try {
+          const emailHtml = generateMOMEmailHTML(meeting, participant);
+          await enqueueJob(QUEUE_NAMES.EMAIL, 'SEND_MOM_EMAIL', {
+            organizationId: meeting.organizationId,
+            userId: participant._id,
+            email: participant.email,
+            subject: `📋 Minutes of Meeting: ${meeting.title}`,
+            html: emailHtml
+          });
+        } catch (queueErr) {
+          console.warn(`[MOM Queue Notice] Enqueue email failed, sending directly:`, queueErr.message);
+          sendMOMEmail(meeting, participant).catch(e => console.warn(e.message));
+        }
+      }
+
+      // 2. Create Issues for each action item idempotently using issueService
+      const orgId = meeting.organizationId;
+
+      for (const actionItem of meeting.mom.actionItems) {
+        if (!actionItem.createdIssueId) {
+          try {
+            const targetAssignee = actionItem.assigneeId?._id || actionItem.assigneeId || hostId;
+            const createdIssue = await issueService.createIssue(
+              hostId,
+              orgId,
+              {
+                title: actionItem.title || 'Meeting Action Item',
+                description: actionItem.description || `Action item from meeting: ${meeting.title}`,
+                project: meeting.projectId,
+                sprint: meeting.sprintId || undefined,
+                assignee: targetAssignee,
+                priority: actionItem.priority ? actionItem.priority.toLowerCase() : 'medium',
+                dueDate: actionItem.dueDate || undefined,
+                status: 'todo',
+                type: 'task'
+              },
+              req.io
+            );
+            actionItem.createdIssueId = createdIssue._id;
+          } catch (err) {
+            console.error('Error creating issue for action item:', err);
+          }
+        }
+      }
+
+      await meeting.save();
+
+      // 3. Log activity
+      await Activity.create({
+        organizationId: meeting.organizationId,
+        projectId: meeting.projectId,
+        user: req.user._id,
+        meetingId: meeting._id,
+        type: 'mom_sent',
+        metadata: {
+          meetingTitle: meeting.title,
+          actionItemsCount: meeting.mom.actionItems.length,
+          attendeeCount: uniqueAttendees.length
+        }
+      });
     });
 
     res.json({
       success: true,
-      message: 'MOM sent to all participants and action items created',
+      message: 'MOM confirmed, emails queued, and action items created successfully',
       meeting
     });
   } catch (error) {
@@ -458,15 +475,11 @@ exports.confirmAndSendMOM = async (req, res) => {
 exports.getTranscript = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const transcript = await Transcript.findOne({ meetingId });
-
-    if (!transcript) {
-      return res.status(404).json({ error: 'Transcript not found' });
-    }
+    const { meeting, transcript } = await assertTranscriptAccess(req, meetingId);
 
     res.json({ success: true, transcript });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 };
 

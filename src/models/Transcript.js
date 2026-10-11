@@ -8,6 +8,17 @@ const transcriptSchema = new Schema({
     required: true
   },
   
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    index: true
+  },
+  organization: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    index: true
+  },
+  
   // Raw segments captured during meeting
   segments: [
     {
@@ -24,8 +35,9 @@ const transcriptSchema = new Schema({
   
 }, { timestamps: true });
 
-// Indexes for search
+// Indexes for search and tenant scoping
 transcriptSchema.index({ meetingId: 1 });
+transcriptSchema.index({ organizationId: 1, meetingId: 1 });
 transcriptSchema.index({ fullText: 'text' });
 
 module.exports = mongoose.model('Transcript', transcriptSchema);

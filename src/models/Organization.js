@@ -49,6 +49,8 @@ const organizationSchema = new mongoose.Schema(
         stripeSubscriptionId: String,
         cashfreeSubscriptionId: String,
         cashfreePlanId: String,
+        lastOrderId: String,
+        pendingPlan: String,
         subscriptionStatus: {
             type: String,
             enum: ['active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'trialing', 'unpaid', 'ACTIVE', 'ON_HOLD', 'CANCELLED'],

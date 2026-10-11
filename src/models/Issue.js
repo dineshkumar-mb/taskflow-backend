@@ -120,10 +120,12 @@ const issueSchema = new mongoose.Schema(
 // Indexes for performance optimization
 issueSchema.index({ organization: 1 });
 issueSchema.index({ project: 1 }); // Quickly fetch all issues in a project
+issueSchema.index({ organization: 1, project: 1, createdAt: -1 }); // Fast project issue list
 issueSchema.index({ project: 1, status: 1 }); // Used in Board column views
+issueSchema.index({ organization: 1, status: 1 });
 issueSchema.index({ sprint: 1 }); // Used for sprint filtering
 issueSchema.index({ assignee: 1 }); // Workload queries
-issueSchema.index({ key: 1 }, { unique: true }); // Fast key lookup
+issueSchema.index({ organization: 1, key: 1 }, { unique: true }); // Tenant-scoped key lookup
 
 // Middleware to populate searchText for future search index
 issueSchema.pre('save', function() {

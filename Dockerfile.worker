@@ -1,0 +1,20 @@
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache libc6-compat
+
+# Copy dependency files
+COPY package*.json ./
+
+# Install production dependencies
+RUN npm ci --omit=dev
+
+# Copy application source code
+COPY . .
+
+ENV NODE_ENV=production
+
+# Worker does not expose HTTP port, executes worker event loop
+CMD ["node", "src/workers/index.js"]

@@ -101,14 +101,8 @@ const createSubscription = async (organizationId, userEmail, userPhone, userName
         
         organization.cashfreeSubscriptionId = subscriptionId;
         organization.cashfreePlanId = planId;
-        organization.plan = plan; // Pre-emptively set selection
+        organization.pendingPlan = plan; // Set as pending until verified webhook confirms payment
         await organization.save();
-
-        // Increment redemption count if coupon was used
-        if (appliedCoupon) {
-            appliedCoupon.redemptionsCount += 1;
-            await appliedCoupon.save();
-        }
 
         return {
             subscriptionId: response.data.subscription_id,
@@ -121,15 +115,103 @@ const createSubscription = async (organizationId, userEmail, userPhone, userName
     }
 };
 
-const verifyWebhookSignature = (signature, rawBody) => {
-    const expectedSignature = crypto.createHmac('sha256', secretKey)
-        .update(rawBody)
-        .digest('base64');
-        
-    return signature === expectedSignature;
+const createOrder = async (organizationId, userEmail, userPhone, userName, plan = 'pro', couponCode = null) => {
+    const organization = await Organization.findById(organizationId);
+    if (!organization) throw new Error('Organization not found');
+
+    const planPrices = {
+        pro: 199,
+        team: 499
+    };
+    const basePrice = planPrices[plan] || 199;
+    let finalPrice = basePrice;
+
+    if (couponCode) {
+        const Coupon = require('../models/Coupon');
+        const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+        if (coupon && coupon.isValid()) {
+            if (coupon.discountType === 'percentage') {
+                finalPrice = basePrice * (1 - coupon.discountValue / 100);
+            } else if (coupon.discountType === 'flat') {
+                finalPrice = Math.max(0, basePrice - coupon.discountValue);
+            }
+            finalPrice = Math.round(finalPrice);
+        }
+    }
+
+    // Ensure order_id is valid alphanumeric, under 50 chars
+    const shortOrgId = organizationId.toString().slice(-8);
+    const orderId = `tf_${shortOrgId}_${Date.now()}`;
+    const customerPhone = userPhone || '9999999999';
+
+    const payload = {
+        order_id: orderId,
+        order_amount: finalPrice,
+        order_currency: 'INR',
+        customer_details: {
+            customer_id: String(organizationId),
+            customer_email: userEmail || 'billing@taskflow.com',
+            customer_phone: customerPhone,
+            customer_name: userName || 'TaskFlow User'
+        },
+        order_meta: {
+            return_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/billing?order_id={order_id}`
+        },
+        order_note: `TaskFlow ${plan.toUpperCase()} Plan (${organization.name})`,
+        order_tags: {
+            plan,
+            organization_id: String(organizationId)
+        }
+    };
+
+    try {
+        const response = await axios.post(`${CASHFREE_BASE_URL}/orders`, payload, { headers: getHeaders() });
+        organization.pendingPlan = plan;
+        organization.lastOrderId = orderId;
+        await organization.save();
+
+        return {
+            order_id: response.data.order_id,
+            payment_session_id: response.data.payment_session_id,
+            order_status: response.data.order_status
+        };
+    } catch (error) {
+        console.error('Cashfree Create Order Error:', error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || 'Failed to create Cashfree payment order.');
+    }
+};
+
+const getOrder = async (orderId) => {
+    try {
+        const response = await axios.get(`${CASHFREE_BASE_URL}/orders/${orderId}`, { headers: getHeaders() });
+        return response.data;
+    } catch (error) {
+        console.error('Cashfree Get Order Error:', error.response?.data || error.message);
+        throw new Error(error.response?.data?.message || 'Failed to fetch order status.');
+    }
+};
+
+const verifyWebhookSignature = (signature, timestamp, rawBody) => {
+    if (!signature || !secretKey) return false;
+    try {
+        const signedPayload = timestamp ? `${timestamp}${rawBody}` : rawBody;
+        const expectedSignature = crypto.createHmac('sha256', secretKey)
+            .update(signedPayload)
+            .digest('base64');
+            
+        const sigBuf = Buffer.from(signature);
+        const expBuf = Buffer.from(expectedSignature);
+        if (sigBuf.length !== expBuf.length) return false;
+        return crypto.timingSafeEqual(sigBuf, expBuf);
+    } catch (e) {
+        console.error('Webhook signature verification exception:', e.message);
+        return false;
+    }
 };
 
 module.exports = {
+    createOrder,
+    getOrder,
     createSubscription,
     verifyWebhookSignature
 };

@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { createSprint, getSprints, updateSprint, startSprint, completeSprint } = require('../controllers/sprint.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 
 router.use(protect);
+router.use(requireTenantContext);
 
-const pmRoles = ['OrgOwner', 'Admin', 'Project Manager'];
+const pmRoles = ['SuperAdmin', 'OrgOwner', 'Admin', 'ProjectManager', 'Project Manager'];
 
 router.route('/')
     .post(authorize(...pmRoles), createSprint);

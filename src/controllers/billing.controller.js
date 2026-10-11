@@ -5,18 +5,35 @@ const Project = require('../models/Project');
 const createCheckoutSession = async (req, res) => {
     try {
         const { plan, couponCode } = req.body;
-        // Default to 'pro' if not provided for backward compatibility
         const selectedPlan = plan || 'pro';
+        const orgId = req.organizationId || req.user.organizationId;
 
-        const result = await cashfreeService.createSubscription(
-            req.user.organizationId,
-            req.user.email,
-            req.user.phone,
-            req.user.name,
-            selectedPlan,
-            couponCode
-        );
-        res.json({ subscription_session_id: result.subscription_session_id });
+        // Try standard Cashfree Payment Gateway order first (supported for all merchant accounts)
+        try {
+            const orderResult = await cashfreeService.createOrder(
+                orgId,
+                req.user.email,
+                req.user.phone,
+                req.user.name,
+                selectedPlan,
+                couponCode
+            );
+            return res.json({
+                payment_session_id: orderResult.payment_session_id,
+                order_id: orderResult.order_id
+            });
+        } catch (orderError) {
+            console.warn('Standard order creation failed, falling back to subscription:', orderError.message);
+            const result = await cashfreeService.createSubscription(
+                orgId,
+                req.user.email,
+                req.user.phone,
+                req.user.name,
+                selectedPlan,
+                couponCode
+            );
+            return res.json({ subscription_session_id: result.subscription_session_id });
+        }
     } catch (error) {
         console.error('Checkout Session Error:', error);
         res.status(500).json({ message: error.message });
@@ -89,9 +106,11 @@ const getActiveCoupons = async (req, res) => {
 const handleCashfreeWebhook = async (req, res) => {
     try {
         const signature = req.headers['x-webhook-signature'];
-        const rawBody = JSON.stringify(req.body);
+        const timestamp = req.headers['x-webhook-timestamp'];
+        const rawBody = req.rawBody || JSON.stringify(req.body);
 
-        if (!signature || !cashfreeService.verifyWebhookSignature(signature, rawBody)) {
+        if (!signature || !cashfreeService.verifyWebhookSignature(signature, timestamp, rawBody)) {
+            console.warn('[Cashfree Webhook] Invalid webhook signature received');
             return res.status(400).send('Invalid signature');
         }
 
@@ -105,9 +124,11 @@ const handleCashfreeWebhook = async (req, res) => {
                 const org = await Organization.findOne({ cashfreeSubscriptionId: subId });
                 if (org) {
                     const planId = data.subscription_details.plan_details?.plan_id || '';
-                    const planType = planId.includes('team') ? 'team' : 'pro';
+                    const planType = planId.includes('team') ? 'team' : (org.pendingPlan || 'pro');
 
                     org.plan = planType;
+                    org.currentPlan = planType;
+                    org.pendingPlan = null;
                     org.subscriptionStatus = 'ACTIVE';
                     await org.save();
 
@@ -122,12 +143,14 @@ const handleCashfreeWebhook = async (req, res) => {
                         },
                         { upsert: true, new: true }
                     );
-                    console.log(`Upgraded org ${org._id} to ${planType.toUpperCase()} based on Cashfree webhook.`);
+                    console.log(`[Billing Webhook] Upgraded org ${org._id} to ${planType.toUpperCase()} based on verified Cashfree webhook.`);
                 }
             } else if (status === 'CANCELLED' || status === 'EXPIRED') {
                 const org = await Organization.findOne({ cashfreeSubscriptionId: subId });
                 if (org) {
                     org.plan = 'free';
+                    org.currentPlan = 'free';
+                    org.pendingPlan = null;
                     org.subscriptionStatus = status;
                     await org.save();
 
@@ -142,8 +165,40 @@ const handleCashfreeWebhook = async (req, res) => {
                         },
                         { upsert: true, new: true }
                     );
-                    console.log(`Downgraded org ${org._id} to FREE based on Cashfree webhook.`);
+                    console.log(`[Billing Webhook] Downgraded org ${org._id} to FREE based on Cashfree webhook.`);
                 }
+            }
+        } else if (type === 'ORDER_PAID_WEBHOOK' || type === 'PAYMENT_SUCCESS_WEBHOOK') {
+            const orderId = data?.order?.order_id || data?.order_id;
+            const orgId = data?.order?.order_tags?.organization_id;
+            const planType = data?.order?.order_tags?.plan || 'pro';
+
+            let org = null;
+            if (orgId) {
+                org = await Organization.findById(orgId);
+            } else if (orderId) {
+                org = await Organization.findOne({ lastOrderId: orderId });
+            }
+
+            if (org) {
+                org.plan = planType;
+                org.currentPlan = planType;
+                org.pendingPlan = null;
+                org.subscriptionStatus = 'ACTIVE';
+                await org.save();
+
+                const Subscription = require('../models/Subscription');
+                await Subscription.findOneAndUpdate(
+                    { organization: org._id },
+                    {
+                        plan: planType,
+                        status: 'ACTIVE',
+                        paymentProvider: 'cashfree',
+                        paymentProviderId: orderId
+                    },
+                    { upsert: true, new: true }
+                );
+                console.log(`[Billing Webhook] Upgraded org ${org._id} to ${planType.toUpperCase()} via Cashfree PG order ${orderId}.`);
             }
         }
 
@@ -154,10 +209,51 @@ const handleCashfreeWebhook = async (req, res) => {
     }
 };
 
+const verifyOrderPayment = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const orgId = req.organizationId || req.user.organizationId;
+        const org = await Organization.findById(orgId);
+        if (!org) return res.status(404).json({ message: 'Organization not found' });
+
+        const order = await cashfreeService.getOrder(orderId);
+        if (order && order.order_status === 'PAID') {
+            const planType = org.pendingPlan || order.order_tags?.plan || 'pro';
+            org.plan = planType;
+            org.currentPlan = planType;
+            org.pendingPlan = null;
+            org.subscriptionStatus = 'ACTIVE';
+            await org.save();
+
+            const Subscription = require('../models/Subscription');
+            await Subscription.findOneAndUpdate(
+                { organization: org._id },
+                {
+                    plan: planType,
+                    status: 'ACTIVE',
+                    paymentProvider: 'cashfree',
+                    paymentProviderId: orderId
+                },
+                { upsert: true, new: true }
+            );
+
+            return res.json({ success: true, plan: planType, status: 'PAID' });
+        }
+
+        res.json({ success: false, status: order ? order.order_status : 'PENDING' });
+    } catch (error) {
+        console.error('Verify Order Payment Error:', error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 const getUsage = async (req, res) => {
     try {
-        const organization = await Organization.findById(req.user.organizationId);
-        const projectsCount = await Project.countDocuments({ organization: req.user.organizationId });
+        const orgId = req.organizationId || req.user.organizationId;
+        const organization = await Organization.findById(orgId);
+        if (!organization) return res.status(404).json({ message: 'Organization not found' });
+
+        const projectsCount = await Project.countDocuments({ organization: orgId });
 
         const isPro = organization.plan === 'pro' || organization.plan === 'team';
 
@@ -172,7 +268,7 @@ const getUsage = async (req, res) => {
                 limit: isPro ? 'Unlimited' : 200
             },
             meetings: {
-                used: 0, // Placeholder
+                used: 0,
                 limit: isPro ? 'Unlimited' : 100
             }
         };
@@ -186,6 +282,7 @@ const getUsage = async (req, res) => {
 module.exports = {
     createCheckoutSession,
     createPortalSession,
+    verifyOrderPayment,
     getUsage,
     handleCashfreeWebhook,
     validateCoupon,

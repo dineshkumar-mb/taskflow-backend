@@ -21,10 +21,12 @@ const auditRoutes = require('./audit.routes');
 const webhookRoutes = require('./webhook.routes');
 const healthRoutes = require('./health.routes');
 const adminRoutes = require('./admin.routes');
+const teamRoutes = require('./team.routes');
 
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/projects', projectRoutes);
+router.use('/teams', teamRoutes);
 router.use('/boards', boardRoutes);
 router.use('/sprints', sprintRoutes);
 router.use('/issues', issueRoutes);

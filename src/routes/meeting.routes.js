@@ -1,36 +1,42 @@
 const express = require('express');
 const router = express.Router();
 const meetingController = require('../controllers/meeting.controller');
-const { protect } = require('../middleware/auth.middleware');
+const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
+
+router.use(protect);
+router.use(requireTenantContext);
+
+const activeMemberRoles = ['SuperAdmin', 'OrgOwner', 'Admin', 'Project Manager', 'Member'];
 
 // Create (schedule) a new meeting
-router.post('/', protect, meetingController.createMeeting);
+router.post('/', authorize(...activeMemberRoles), meetingController.createMeeting);
 
 // Get all meetings globally for user
-router.get('/', protect, meetingController.getGlobalMeetings);
+router.get('/', meetingController.getGlobalMeetings);
 
 // Get meetings by project
-router.get('/project/:projectId', protect, meetingController.getMeetingsByProject);
+router.get('/project/:projectId', meetingController.getMeetingsByProject);
 
 // Get single meeting
-router.get('/:meetingId', protect, meetingController.getMeetingById);
+router.get('/:meetingId', meetingController.getMeetingById);
 
 // Update meeting (before it starts)
-router.put('/:meetingId', protect, meetingController.updateMeeting);
+router.put('/:meetingId', authorize(...activeMemberRoles), meetingController.updateMeeting);
 
 // Start meeting
-router.post('/:meetingId/start', protect, meetingController.startMeeting);
+router.post('/:meetingId/start', authorize(...activeMemberRoles), meetingController.startMeeting);
 
 // End meeting
-router.post('/:meetingId/end', protect, meetingController.endMeeting);
+router.post('/:meetingId/end', authorize(...activeMemberRoles), meetingController.endMeeting);
 
 // Generate MOM
-router.post('/:meetingId/mom/generate', protect, meetingController.generateMOM);
+router.post('/:meetingId/mom/generate', authorize(...activeMemberRoles), meetingController.generateMOM);
 
 // Confirm and send MOM
-router.post('/:meetingId/mom/confirm', protect, meetingController.confirmAndSendMOM);
+router.post('/:meetingId/mom/confirm', authorize(...activeMemberRoles), meetingController.confirmAndSendMOM);
 
 // Get transcript
-router.get('/:meetingId/transcript', protect, meetingController.getTranscript);
+router.get('/:meetingId/transcript', meetingController.getTranscript);
 
 module.exports = router;

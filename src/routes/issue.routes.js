@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createIssue, getIssues, getIssueById, updateIssue, deleteIssue, getIssueActivities, githubWebhook, uploadAttachments, addLink, removeLink, reorderIssues, assignIssue } = require('../controllers/issue.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
+const { requireTenantContext } = require('../security/tenantAccess');
 const upload = require('../middleware/upload.middleware');
 
 // Public webhook route (In reality, verify GitHub signature instead of JWT)
@@ -11,6 +12,7 @@ router.post('/webhook/github', githubWebhook);
 router.put('/:id/assign', assignIssue);
 
 router.use(protect);
+router.use(requireTenantContext);
 
 router.route('/')
     .get(getIssues)
@@ -19,7 +21,7 @@ router.route('/')
 router.route('/:id')
     .get(getIssueById)
     .put(updateIssue)
-    .delete(authorize('OrgOwner', 'Admin', 'Project Manager'), deleteIssue);
+    .delete(authorize('SuperAdmin', 'OrgOwner', 'Admin', 'ProjectManager', 'Project Manager'), deleteIssue);
 
 router.get('/:id/activities', getIssueActivities);
 
