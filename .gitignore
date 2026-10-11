@@ -9,3 +9,6 @@ test_out_ascii.txt
 seed_output.log
 error.log
 build.log
+scripts/db_state.json
+.env.*
+*.local

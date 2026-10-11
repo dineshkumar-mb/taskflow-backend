@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Organization = require('../models/Organization');
 
 /**
  * Sync the SuperAdmin account on every server startup.
@@ -26,13 +27,22 @@ const seedSuperAdmin = async () => {
 
         if (!existingAdmin) {
             // ── First run: create the account ────────────────────────────
-            await User.create({
+            const newAdmin = await User.create({
                 name: 'System Admin',
                 email,
                 password,          // pre-save hook will hash this
                 roleName: 'SuperAdmin',
                 isVerified: true,
             });
+            const adminOrg = await Organization.create({
+                name: 'TaskFlow Workspace',
+                owner: newAdmin._id,
+                plan: 'free',
+                members: [{ user: newAdmin._id, role: 'OrgOwner' }]
+            });
+            newAdmin.organizationId = adminOrg._id;
+            newAdmin.organization = adminOrg._id;
+            await newAdmin.save();
             console.log(`[Seed] SuperAdmin created → ${email}`);
             return;
         }
@@ -68,6 +78,23 @@ const seedSuperAdmin = async () => {
         if (existingAdmin.roleName !== 'SuperAdmin') {
             existingAdmin.roleName = 'SuperAdmin';
             changed = true;
+        }
+
+        // 4. Ensure SuperAdmin has an associated organization
+        if (!existingAdmin.organizationId) {
+            let adminOrg = await Organization.findOne({ owner: existingAdmin._id });
+            if (!adminOrg) {
+                adminOrg = await Organization.create({
+                    name: 'TaskFlow Workspace',
+                    owner: existingAdmin._id,
+                    plan: 'free',
+                    members: [{ user: existingAdmin._id, role: 'OrgOwner' }]
+                });
+            }
+            existingAdmin.organizationId = adminOrg._id;
+            existingAdmin.organization = adminOrg._id;
+            changed = true;
+            console.log(`[Seed] SuperAdmin linked to organization → ${adminOrg.name} (${adminOrg._id})`);
         }
 
         if (changed) {

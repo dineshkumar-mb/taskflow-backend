@@ -132,10 +132,18 @@ const getActiveOrganizationId = async (req) => {
 
     // SuperAdmin can operate across tenants if explicit header or user context is supplied
     const effectiveRole = getEffectiveRole(req.user);
-    const requestedOrgId = req.headers['x-organization-id'] || req.user.organizationId || req.user.organization;
+    let requestedOrgId = req.headers['x-organization-id'] || req.user.organizationId || req.user.organization;
 
     if (!requestedOrgId) {
-        throw new TenantAccessError('No active organization associated with user', 400);
+        if (effectiveRole === 'SuperAdmin') {
+            const fallbackOrg = await Organization.findOne();
+            if (fallbackOrg) {
+                requestedOrgId = fallbackOrg._id;
+            }
+        }
+        if (!requestedOrgId) {
+            throw new TenantAccessError('No active organization associated with user', 400);
+        }
     }
 
     const orgIdStr = requestedOrgId.toString();

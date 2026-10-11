@@ -8,35 +8,48 @@ const createCheckoutSession = async (req, res) => {
         const selectedPlan = plan || 'pro';
         const orgId = req.organizationId || req.user.organizationId;
 
-        // Try standard Cashfree Payment Gateway order first (supported for all merchant accounts)
-        try {
-            const orderResult = await cashfreeService.createOrder(
-                orgId,
-                req.user.email,
-                req.user.phone,
-                req.user.name,
-                selectedPlan,
-                couponCode
-            );
-            return res.json({
-                payment_session_id: orderResult.payment_session_id,
-                order_id: orderResult.order_id
+        // Live Cashfree Hosted Payment Links
+        const paymentLinks = {
+            pro: process.env.CASHFREE_PRO_PAYMENT_LINK || 'https://payments.cashfree.com/links?code=Ib54c834ghl0_AAAAAAASoTE',
+            team: process.env.CASHFREE_TEAM_PAYMENT_LINK || 'https://payments.cashfree.com/links?code=bb54ccftqbag_AAAAAAASoTE'
+        };
+
+        if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+            if (paymentLinks[selectedPlan]) {
+                const org = await Organization.findById(orgId);
+                if (org) {
+                    org.pendingPlan = selectedPlan;
+                    await org.save();
+                }
+                return res.json({
+                    url: paymentLinks[selectedPlan],
+                    plan: selectedPlan,
+                    isPaymentLink: true
+                });
+            }
+
+            return res.status(400).json({
+                message: 'Cashfree API credentials are not set in the server environment. Please configure CASHFREE_APP_ID and CASHFREE_SECRET_KEY in backend/.env',
+                code: 'CASHFREE_CREDENTIALS_MISSING'
             });
-        } catch (orderError) {
-            console.warn('Standard order creation failed, falling back to subscription:', orderError.message);
-            const result = await cashfreeService.createSubscription(
-                orgId,
-                req.user.email,
-                req.user.phone,
-                req.user.name,
-                selectedPlan,
-                couponCode
-            );
-            return res.json({ subscription_session_id: result.subscription_session_id });
         }
+
+        const orderResult = await cashfreeService.createOrder(
+            orgId,
+            req.user.email,
+            req.user.phone,
+            req.user.name,
+            selectedPlan,
+            couponCode
+        );
+
+        return res.json({
+            payment_session_id: orderResult.payment_session_id,
+            order_id: orderResult.order_id
+        });
     } catch (error) {
         console.error('Checkout Session Error:', error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: error.message || 'Failed to initialize payment order.' });
     }
 };
 
@@ -279,6 +292,38 @@ const getUsage = async (req, res) => {
     }
 };
 
+const confirmPaymentLink = async (req, res) => {
+    try {
+        const { plan } = req.body;
+        const orgId = req.organizationId || req.user.organizationId;
+        const org = await Organization.findById(orgId);
+        if (!org) return res.status(404).json({ message: 'Organization not found' });
+
+        const targetPlan = plan || org.pendingPlan || 'pro';
+        org.plan = targetPlan;
+        org.currentPlan = targetPlan;
+        org.pendingPlan = null;
+        org.subscriptionStatus = 'ACTIVE';
+        await org.save();
+
+        const Subscription = require('../models/Subscription');
+        await Subscription.findOneAndUpdate(
+            { organization: org._id },
+            {
+                plan: targetPlan,
+                status: 'ACTIVE',
+                paymentProvider: 'cashfree_link',
+                paymentProviderId: `cf_link_${Date.now()}`
+            },
+            { upsert: true, new: true }
+        );
+
+        res.json({ success: true, plan: targetPlan });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     createCheckoutSession,
     createPortalSession,
@@ -287,5 +332,6 @@ module.exports = {
     handleCashfreeWebhook,
     validateCoupon,
     getActiveCoupons,
+    confirmPaymentLink
 };
 

@@ -2,16 +2,18 @@ const axios = require('axios');
 const crypto = require('crypto');
 const Organization = require('../models/Organization');
 
-const CASHFREE_BASE_URL = process.env.NODE_ENV === 'production' 
+const isProduction = () => process.env.CASHFREE_ENVIRONMENT === 'production' || process.env.NODE_ENV === 'production';
+
+const getBaseUrl = () => isProduction() 
     ? 'https://api.cashfree.com/pg' 
     : 'https://sandbox.cashfree.com/pg';
 
-const appId = process.env.CASHFREE_APP_ID || 'TEST_APP_ID';
-const secretKey = process.env.CASHFREE_SECRET_KEY || 'TEST_SECRET_KEY';
+const getAppId = () => process.env.CASHFREE_APP_ID;
+const getSecretKey = () => process.env.CASHFREE_SECRET_KEY;
 
 const getHeaders = () => ({
-    'x-client-id': appId,
-    'x-client-secret': secretKey,
+    'x-client-id': getAppId(),
+    'x-client-secret': getSecretKey(),
     'x-api-version': '2025-01-01',
     'Content-Type': 'application/json'
 });
@@ -29,7 +31,7 @@ const ensurePlanExists = async (planId, planName, amount) => {
     };
 
     try {
-        await axios.post(`${CASHFREE_BASE_URL}/plans`, planPayload, { headers: getHeaders() });
+        await axios.post(`${getBaseUrl()}/plans`, planPayload, { headers: getHeaders() });
     } catch (error) {
         // If it already exists, Cashfree returns an error. We can safely ignore it.
         console.log('Plan check: ', error.response?.data?.message || error.message);
@@ -97,7 +99,7 @@ const createSubscription = async (organizationId, userEmail, userPhone, userName
     };
 
     try {
-        const response = await axios.post(`${CASHFREE_BASE_URL}/subscriptions`, payload, { headers: getHeaders() });
+        const response = await axios.post(`${getBaseUrl()}/subscriptions`, payload, { headers: getHeaders() });
         
         organization.cashfreeSubscriptionId = subscriptionId;
         organization.cashfreePlanId = planId;
@@ -165,7 +167,7 @@ const createOrder = async (organizationId, userEmail, userPhone, userName, plan 
     };
 
     try {
-        const response = await axios.post(`${CASHFREE_BASE_URL}/orders`, payload, { headers: getHeaders() });
+        const response = await axios.post(`${getBaseUrl()}/orders`, payload, { headers: getHeaders() });
         organization.pendingPlan = plan;
         organization.lastOrderId = orderId;
         await organization.save();
@@ -183,7 +185,7 @@ const createOrder = async (organizationId, userEmail, userPhone, userName, plan 
 
 const getOrder = async (orderId) => {
     try {
-        const response = await axios.get(`${CASHFREE_BASE_URL}/orders/${orderId}`, { headers: getHeaders() });
+        const response = await axios.get(`${getBaseUrl()}/orders/${orderId}`, { headers: getHeaders() });
         return response.data;
     } catch (error) {
         console.error('Cashfree Get Order Error:', error.response?.data || error.message);
@@ -192,10 +194,11 @@ const getOrder = async (orderId) => {
 };
 
 const verifyWebhookSignature = (signature, timestamp, rawBody) => {
-    if (!signature || !secretKey) return false;
+    const secret = getSecretKey();
+    if (!signature || !secret) return false;
     try {
         const signedPayload = timestamp ? `${timestamp}${rawBody}` : rawBody;
-        const expectedSignature = crypto.createHmac('sha256', secretKey)
+        const expectedSignature = crypto.createHmac('sha256', secret)
             .update(signedPayload)
             .digest('base64');
             
